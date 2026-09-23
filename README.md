@@ -1,8 +1,13 @@
 ![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg) ![](../../workflows/fpga/badge.svg)
 
-# Tiny Tapeout Verilog Project Template
+# Tiny Tapeout 8-bit Programmable Counter
 
-- [Read the documentation for project](docs/info.md)
+- [Read the project documentation](docs/info.md)
+
+An 8-bit binary up-counter with asynchronous active-low reset, synchronous
+parallel load, modulo-256 wraparound, and tri-state output control. The project
+targets the GF180MCU process through the Tiny Tapeout `ttgf26a` GitHub Actions
+flow.
 
 ## What is Tiny Tapeout?
 

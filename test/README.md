@@ -5,8 +5,7 @@ See below to get started or for more information, check the [website](https://ti
 
 ## Setting up
 
-1. Edit [Makefile](Makefile) and modify `PROJECT_SOURCES` to point to your Verilog files.
-2. Edit [tb.v](tb.v) and replace `tt_um_example` with your module name.
+The Makefile and testbench are configured for `tt_um_j_xu0_counter`.
 
 ## How to run
 
