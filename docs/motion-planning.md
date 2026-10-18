@@ -140,6 +140,8 @@ Port-level motor tests model legal encoder feedback, dropped steps and disturban
 This idealized digital model does not establish real motor stability or tuning.
 
 Full-top generic Yosys/ABC synthesis passes with 611 flip-flops and approximately 6,800 generic
-cells. GF180 mapped area, 1x1 tile fit, operation at 10 MHz, gate-level behavior,
-and physical signoff remain unverified. The existing GF180 workflow now includes
+cells. The first GF180 run measured about 145,526 um² of movable cells and
+failed placement in 1x1; the allocation is now provisionally 3x2. Operation at
+10 MHz, completed routing, gate-level behavior, and physical signoff remain
+unverified. See `hardening.md` for the area investigation. The existing GF180 workflow now includes
 all source files; its actual reports must determine physical feasibility.

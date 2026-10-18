@@ -13,7 +13,7 @@ choices needed to make that foundation testable.
 | 5 | Fixed-point PI and anti-windup | Signed arithmetic, all gains, saturation, integrator limits | Implemented in RTL |
 | 6 | STEP/DIR/ENABLE generator | Pulse width/spacing, DIR setup/hold, disable and fault interlocks | Implemented in RTL |
 | 7 | Closed-loop integration | Motor/encoder model, forward/reverse targets, disturbances, settling | Implemented in RTL |
-| 8 | GF180 submission checks | Full-design synthesis, tile fit, STA, gate-level tests, precheck and physical verification | Generic synthesis passes; GF180 checks pending |
+| 8 | GF180 submission checks | Full-design synthesis, tile fit, STA, gate-level tests, precheck and physical verification | Generic synthesis passes; original 1x1 placement overflow; 3x2 rerun pending |
 
 Two subagents independently implemented steps 1 and 2 and their unit tests, then
 reviewed each other's modules. The main agent integrated the design and added

@@ -114,7 +114,8 @@ and output loading. RTL tests alone do not prove them.
 
 All functional blocks now feed observable motion/status outputs. Generic Yosys
 synthesis passes, but tile fit, GF180 STA, DRC/LVS, and gate-level simulation are
-still unverified. The 1x1 tile allocation remains provisional.
+still unverified. The full controller exceeded the original 1x1 floorplan;
+the allocation is now provisionally 3x2. See `hardening.md` for measured area.
 
 ## How to test
 

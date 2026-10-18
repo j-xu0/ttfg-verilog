@@ -21,8 +21,10 @@ The numerical and driver-interface choices are documented below. GF180 tile fit,
 
 The top module is `tt_um_j_xu0_stepper`. The GF180 build uses `gf180mcuD` and the
 repository's existing `ttgf26a` workflow. The system clock target is **10 MHz**;
-`info.yaml` and the 100 ns constraint in `src/config.json` agree. The 1x1 tile
-allocation is provisional until the complete design is hardened.
+`info.yaml` and the 100 ns constraint in `src/config.json` agree. The 3x2 tile
+allocation is provisional until the complete design is hardened. The full
+controller exceeded the original 1x1 floorplan; see
+[the hardening investigation](docs/hardening.md).
 
 With Python, Icarus Verilog, and make installed, run from the repository root:
 
