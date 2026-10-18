@@ -12,6 +12,10 @@ quadrature decoding, fault reporting, and Tiny Tapeout integration. Motor output
 remain inactive. This is an interface milestone, not a complete motor controller
 or a tapeout-ready design.
 
+The next milestone adds standalone, configurable timebase and trajectory-planner
+modules with unit tests. They are not connected to the command registers or motor
+outputs yet; see the roadmap for the remaining integration decisions.
+
 - [Interface, pinout, and timing](docs/info.md)
 - [Implementation steps and unresolved proposal details](docs/implementation.md)
 - [Running the tests](test/README.md)
@@ -27,7 +31,7 @@ With Python, Icarus Verilog, and make installed, run from the repository root:
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r test/requirements.txt
-python -m pytest test/test_spi.py test/test_encoder.py -q
+python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py -q
 make -C test -B
 ```
 

@@ -6,12 +6,16 @@ Install Icarus Verilog and make, then run from the repository root:
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r test/requirements.txt
-python -m pytest test/test_spi.py test/test_encoder.py -q
+python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py -q
 make -C test -B
 ```
 
 The pytest runners compile each standalone module and run cocotb assertions.
 Each suite contains many directed cases:
+
+- Timebase and planner: standalone motion-building-block tests described in
+  [the motion-planning contract](../docs/motion-planning.md). These modules are
+  not yet instantiated in the top-level design.
 
 - SPI: all registers and signed endpoints, truncation/masking, atomic commit,
   every short frame length, overlong/empty frames, reserved address, status
