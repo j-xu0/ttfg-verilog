@@ -2,42 +2,48 @@
  * Copyright (c) 2026 Jason Xu
  * SPDX-License-Identifier: Apache-2.0
  */
-
 `default_nettype none
 
-module tt_um_j_xu0_counter (
-    input  wire [7:0] ui_in,    // ui_in[0]: load, ui_in[1]: output enable
-    output wire [7:0] uo_out,   // Unused dedicated outputs
-    input  wire [7:0] uio_in,   // Parallel load value
-    output wire [7:0] uio_out,  // Counter output value
-    output wire [7:0] uio_oe,   // Active-high output enables
+// Stage 1: command and feedback interfaces. Motion outputs stay inactive until
+// the planner, controller, and pulse generator have been implemented and tested.
+module tt_um_j_xu0_stepper (
+    input  wire [7:0] ui_in,
+    output wire [7:0] uo_out,
+    input  wire [7:0] uio_in,
+    output wire [7:0] uio_out,
+    output wire [7:0] uio_oe,
     input  wire       ena,
     input  wire       clk,
-    input  wire       rst_n     // Asynchronous active-low reset
+    input  wire       rst_n
 );
+  wire signed [12:0] target;
+  wire signed [12:0] position;
+  wire [3:0] control;
+  wire [5:0] plan;
+  wire miso, encoder_fault, write_pulse, reject_pulse;
 
-  reg [7:0] count;
+  stepper_spi spi (
+      .clk(clk), .rst_n(rst_n),
+      .sclk(ui_in[0]), .cs_n(ui_in[1]), .mosi(ui_in[2]),
+      .busy(1'b0), .fault(encoder_fault), .at_target(1'b0),
+      .miso(miso), .target(target), .control(control), .plan(plan),
+      .write_pulse(write_pulse), .reject_pulse(reject_pulse)
+  );
 
-  // Reset takes effect immediately. Loading and counting occur on rising edges.
-  always @(posedge clk or negedge rst_n) begin
-    if (!rst_n)
-      count <= 8'h00;
-    else if (ui_in[0])
-      count <= uio_in;
-    else
-      count <= count + 8'h01;
-  end
+  quadrature_decoder encoder (
+      .clk(clk), .rst_n(rst_n), .a(ui_in[3]), .b(ui_in[4]),
+      .position(position), .fault(encoder_fault)
+  );
 
-  // Tiny Tapeout implements tri-state bidirectional pins with separate data and
-  // output-enable buses. All eight pins are high impedance when ui_in[1] is 0.
-  assign uio_out = count;
-  assign uio_oe  = {8{ui_in[1]}};
+  // [6] MISO fills an unspecified output assignment in the proposal.
+  // [5] Fault is observable; busy/settled and all motor signals remain inactive.
+  assign uo_out = {1'b0, (ena && rst_n && miso),
+                   (ena && rst_n && encoder_fault), 5'b0};
+  assign uio_out = 8'h00;
+  assign uio_oe = 8'h00;
 
-  assign uo_out = 8'h00;
-
-  // Prevent warnings for intentionally unused inputs.
-  wire _unused = &{ena, ui_in[7:2], 1'b0};
-
+  wire _unused = &{ui_in[7:5], uio_in, target, position, control, plan,
+                   write_pulse, reject_pulse, 1'b0};
 endmodule
 
 `default_nettype wire

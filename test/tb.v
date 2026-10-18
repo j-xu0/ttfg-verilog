@@ -27,7 +27,7 @@ module tb ();
   wire VGND = 1'b0;
 `endif
 
-  tt_um_j_xu0_counter user_project (
+  tt_um_j_xu0_stepper user_project (
 
       // Include power ports for the Gate Level test:
 `ifdef GL_TEST
