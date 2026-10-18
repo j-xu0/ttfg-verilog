@@ -24,7 +24,7 @@ jobs:
         run: pip install -r test/requirements.txt
 
       - name: Run module unit tests
-        run: python -m pytest test/test_spi.py test/test_encoder.py -q
+        run: python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py -q
 
       - name: Run tests
         run: |
