@@ -8,7 +8,7 @@ FST ?= -fst # Use more efficient FST format
 TOPLEVEL_LANG ?= verilog
 TEST_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 SRC_DIR = $(TEST_DIR)/../src
-PROJECT_SOURCES = project.v stepper_spi.v quadrature_decoder.v
+PROJECT_SOURCES = project.v stepper_spi.v quadrature_decoder.v control_timebase.v motion_planner.v pi_controller.v step_dir_generator.v
 
 ifneq ($(GATES),yes)
 

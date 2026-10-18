@@ -7,14 +7,13 @@ controller receives signed target positions over SPI, plans trapezoidal motion,
 and uses quadrature feedback and a PI controller to drive an external STEP/DIR
 motor driver.
 
-**Stage 1 is implemented:** mode-0 SPI, TARGET/CONTROL/PLAN registers, synchronized
-quadrature decoding, fault reporting, and Tiny Tapeout integration. Motor outputs
-remain inactive. This is an interface milestone, not a complete motor controller
-or a tapeout-ready design.
+**Closed-loop RTL is implemented:** SPI command registers, synchronized encoder
+feedback, a Q16 trapezoidal planner, PI control with anti-windup, and timed
+STEP/DIR/ENABLE outputs. TARGET commands now drive motion in simulation, correct
+missed steps and disturbances, and report busy/settled/fault status.
 
-The next milestone adds standalone, configurable timebase and trajectory-planner
-modules with unit tests. They are not connected to the command registers or motor
-outputs yet; see the roadmap for the remaining integration decisions.
+The numerical and driver-interface choices are documented below. GF180 tile fit,
+10 MHz physical timing, gate-level verification, and hardware tuning are pending.
 
 - [Interface, pinout, and timing](docs/info.md)
 - [Implementation steps and unresolved proposal details](docs/implementation.md)
@@ -31,7 +30,7 @@ With Python, Icarus Verilog, and make installed, run from the repository root:
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r test/requirements.txt
-python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py -q
+python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py test/test_pi.py test/test_step_dir.py -q
 make -C test -B
 ```
 

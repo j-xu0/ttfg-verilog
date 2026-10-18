@@ -20,7 +20,8 @@ module stepper_spi (
     output reg signed [12:0] target,
     output reg [3:0] control,
     output reg [5:0] plan,
-    output reg write_pulse, reject_pulse
+    output reg write_pulse, reject_pulse,
+    output reg target_write_pulse
 );
     (* async_reg = "true" *) reg sclk_meta, sclk_sync;
     (* async_reg = "true" *) reg cs_meta, cs_sync;
@@ -55,6 +56,7 @@ module stepper_spi (
             control <= 4'd0;
             plan <= 6'd0;
             write_pulse <= 1'b0;
+            target_write_pulse <= 1'b0;
             reject_pulse <= 1'b0;
         end else begin
             input_valid <= {input_valid[0], 1'b1};
@@ -71,6 +73,7 @@ module stepper_spi (
             mosi_meta <= mosi;
             mosi_sync <= mosi_meta;
             write_pulse <= 1'b0;
+            target_write_pulse <= 1'b0;
             reject_pulse <= 1'b0;
 
             if (cs_armed && cs_last && !cs_sync) begin
@@ -89,6 +92,7 @@ module stepper_spi (
                             2'd0: begin
                                 target <= rx_shift[12:0];
                                 write_pulse <= 1'b1;
+                                target_write_pulse <= 1'b1;
                             end
                             2'd1: begin
                                 control <= rx_shift[3:0];
