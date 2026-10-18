@@ -1,14 +1,15 @@
 # Tiny Tapeout project information
 project:
-  title:        "Stepper Driver Interfaces"      # Project title
+  title:        "Closed-loop Stepper Controller"      # Project title
   author:       "Jason Xu"      # Your name
   discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
-  description:  "SPI registers and quadrature feedback for a staged stepper motor controller"      # One line description of what your project does
+  description:  "SPI-controlled trapezoidal stepper servo with quadrature feedback"      # One line description of what your project does
   language:     "Verilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
   clock_hz:     10000000       # Clock frequency in Hz (or 0 if not applicable)
 
-  # Tile allocation remains provisional until full-design GF180 hardening.
-  tiles: "1x1"          # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 3x4 or 4x4
+  # Full controller exceeded 1x1 area; 3x2 retains 60% placement headroom.
+  # Allocation remains provisional until full GF180 hardening succeeds.
+  tiles: "3x2"          # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 3x4 or 4x4
 
   # Your top module name must start with "tt_um_". Make it unique by including your github username:
   top_module:  "tt_um_j_xu0_stepper"
@@ -20,6 +21,10 @@ project:
     - "project.v"
     - "stepper_spi.v"
     - "quadrature_decoder.v"
+    - "control_timebase.v"
+    - "motion_planner.v"
+    - "pi_controller.v"
+    - "step_dir_generator.v"
 
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
@@ -30,16 +35,16 @@ pinout:
   ui[2]: "SPI MOSI"
   ui[3]: "Encoder A"
   ui[4]: "Encoder B"
-  ui[5]: "Motion enable (reserved for next stage)"
+  ui[5]: "Motion enable"
   ui[6]: ""
   ui[7]: ""
 
   # Outputs
-  uo[0]: "STEP (inactive in stage 1)"
-  uo[1]: "DIR (inactive in stage 1)"
-  uo[2]: "ENABLE (inactive in stage 1)"
-  uo[3]: "Busy (inactive in stage 1)"
-  uo[4]: "At target (inactive in stage 1)"
+  uo[0]: "STEP"
+  uo[1]: "DIR"
+  uo[2]: "ENABLE"
+  uo[3]: "Busy"
+  uo[4]: "At target"
   uo[5]: "Encoder fault"
   uo[6]: "SPI MISO"
   uo[7]: ""

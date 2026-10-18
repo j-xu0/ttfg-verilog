@@ -49,19 +49,23 @@ async def bits(dut, word, count=16):
 
 async def finish(dut, writes=0, rejects=0):
     dut.cs_n.value = 1
-    observed_writes = observed_rejects = 0
+    observed_writes = observed_rejects = observed_targets = 0
     for _ in range(8):
         await cycles(dut)
         observed_writes += int(dut.write_pulse.value)
         observed_rejects += int(dut.reject_pulse.value)
+        observed_targets += int(dut.target_write_pulse.value)
+        assert not int(dut.target_write_pulse.value) or int(dut.write_pulse.value)
     assert (observed_writes, observed_rejects) == (writes, rejects)
     assert int(dut.miso.value) == 0
+    return observed_targets
 
 
 async def frame(dut, word, count=16, writes=0, rejects=0):
     await begin(dut)
     reply = await bits(dut, word, count)
-    await finish(dut, writes, rejects)
+    target_writes = await finish(dut, writes, rejects)
+    assert target_writes == int(bool(writes) and ((word >> 13) & 3) == 0)
     return reply
 
 
@@ -82,7 +86,7 @@ async def spi_contract(dut):
         old = registers(dut)
         await bits(dut, 0x8000 | payload)
         assert registers(dut) == old, "must wait for CS deassertion"
-        await finish(dut, writes=1)
+        assert await finish(dut, writes=1) == 1
         assert registers(dut) == (payload, 0, 0)
     await frame(dut, 0xA000 | 0x1FFA, writes=1)
     assert registers(dut) == (8191, 10, 0)

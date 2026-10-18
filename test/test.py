@@ -4,7 +4,8 @@ import os
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import FallingEdge, ReadOnly, Timer
+from cocotb.triggers import Edge, FallingEdge, ReadOnly, Timer
+from cocotb.utils import get_sim_time
 
 
 _pins = 2
@@ -55,9 +56,8 @@ async def ports_status_and_reset(dut):
     assert int(dut.uio_out.value) == 0
     assert await spi_frame(dut, 0) == 0
 
-    # All motor/status outputs below fault stay inactive, even with enable high
-    # and arbitrary commands. The bidirectional pins remain inputs.
-    set_input(dut, 5, 1)
+    # Configuration while disabled cannot drive motor pins. Bidirectional pins
+    # remain inputs; TARGET is queued until motion enable is asserted.
     for command in (0x8FFF, 0xA00F, 0xC03F):
         await spi_frame(dut, command)
         assert int(dut.uo_out.value) & 0xBF == 0
@@ -117,3 +117,194 @@ async def rtl_register_and_encoder_integration(dut):
         set_input(dut, 4, phase & 1)
         await Timer(1000, unit="ns")
     assert int(dut.user_project.encoder.position.value) == 4
+
+
+class MotorModel:
+    """One legal x4 encoder count per STEP rising edge, with optional lost steps."""
+    def __init__(self, dut):
+        self.dut = dut
+        self.position = 0
+        self.phase = 0
+        self.drop_next = False
+        self.steps = 0
+        self.rises = []
+        self.widths = []
+        self.rise = None
+        self.previous = int(dut.uo_out.value)
+
+    def advance(self, delta):
+        self.position += delta
+        self.phase = (self.phase + delta) % 4
+        phase = (0, 1, 3, 2)[self.phase]
+        set_input(self.dut, 3, phase >> 1)
+        set_input(self.dut, 4, phase & 1)
+
+    async def run(self):
+        while True:
+            await Edge(self.dut.uo_out)
+            await Timer(1, unit="ns")
+            pins = int(self.dut.uo_out.value)
+            now = get_sim_time(unit="ns")
+            if pins & 1 and not self.previous & 1:
+                assert pins & 4, "STEP without ENABLE"
+                self.rise = now
+                self.steps += 1
+                self.rises.append(now)
+                if self.drop_next:
+                    self.drop_next = False
+                else:
+                    # Encoder response is asynchronous to clk and arrives well
+                    # before the next possible pulse at the 10 kHz rate cap.
+                    direction = 1 if pins & 2 else -1
+                    await Timer(500, unit="ns")
+                    self.advance(direction)
+            elif self.previous & 1 and not pins & 1:
+                self.widths.append(now - self.rise)
+            self.previous = pins
+
+
+async def wait_settled(dut, timeout_us=150000):
+    for _ in range(timeout_us // 100):
+        pins = int(dut.uo_out.value)
+        assert not pins & 0x20, "unexpected feedback fault"
+        if pins & 0x10:
+            assert not pins & 0x09, "settled with busy/STEP asserted"
+            return
+        await Timer(100, unit="us")
+    raise AssertionError("move did not settle within motor-model timeout")
+
+
+@cocotb.test()
+async def closed_loop_moves_and_disturbance(dut):
+    await initialize(dut)
+    motor = MotorModel(dut)
+    cocotb.start_soon(motor.run())
+    await spi_frame(dut, 0xA000)  # Kp=Ki=1/8
+    await spi_frame(dut, 0xC03F)  # 10000 steps/s, ~100000 steps/s^2
+    await spi_frame(dut, 0x8004)  # configure target while disabled
+    await Timer(100, unit="us")
+    assert int(dut.uo_out.value) & 0x1F == 0
+    motor.drop_next = True
+    set_input(dut, 5, 1)
+    await Timer(1, unit="us")
+    assert int(dut.uo_out.value) & 8
+    assert await spi_frame(dut, 0) & 0x4000
+    await spi_frame(dut, 0x8007)  # rejected while busy, must still land at 4
+    await wait_settled(dut)
+    assert motor.position == 4
+    assert motor.steps >= 5, "missed step was not corrected"
+    assert await spi_frame(dut, 0) == 0x2000
+
+    # Regression: accepting a new TARGET after settle must launch a new plan,
+    # rather than interpreting the new target as drift from the old reference.
+    await spi_frame(dut, 0x8000 | ((-3) & 0x1FFF))
+    await Timer(1, unit="us")
+    assert int(dut.uo_out.value) & 8
+    await wait_settled(dut)
+    assert motor.position == -3
+    steps_before = motor.steps
+    motor.advance(1)  # external shaft disturbance after settling
+    await Timer(1, unit="us")
+    assert not int(dut.uo_out.value) & 0x10
+    await wait_settled(dut)
+    assert motor.position == -3
+    assert motor.steps > steps_before
+
+    # Same-value TARGET commits are commands, too (not change detection).
+    await spi_frame(dut, 0x8000 | ((-3) & 0x1FFF))
+    await wait_settled(dut)
+    assert motor.position == -3
+    assert motor.widths and min(motor.widths) >= 5000, motor.widths
+    assert int(dut.uio_oe.value) == 0
+    assert int(dut.uio_out.value) == 0
+
+
+@cocotb.test()
+async def motion_abort_and_fault(dut):
+    await initialize(dut)
+    await spi_frame(dut, 0xC03F)
+    await spi_frame(dut, 0x800A)
+    set_input(dut, 5, 1)
+    await Timer(4, unit="ms")
+    assert int(dut.uo_out.value) & 8
+    # A disable does not resume the aborted command on the next enable.
+    set_input(dut, 5, 0)
+    await Timer(10, unit="ns")
+    assert int(dut.uo_out.value) & 7 == 0
+    await Timer(1, unit="us")
+    set_input(dut, 5, 1)
+    await Timer(2, unit="ms")
+    assert int(dut.uo_out.value) & 0x1F == 0
+    await spi_frame(dut, 0x800A)  # explicit rewrite required
+    await Timer(2, unit="us")
+    assert int(dut.uo_out.value) & 8
+    # Illegal two-bit encoder transition latches a fault and stops outputs.
+    set_input(dut, 3, 1)
+    set_input(dut, 4, 1)
+    await Timer(1, unit="us")
+    assert int(dut.uo_out.value) & 0x27 == 0x20
+    assert await spi_frame(dut, 0) == 0x1000
+    await spi_frame(dut, 0x8001)
+    await Timer(2, unit="ms")
+    assert int(dut.uo_out.value) & 0x3F == 0x20
+    dut.rst_n.value = 0
+    await Timer(1, unit="us")
+    assert int(dut.uo_out.value) == 0
+    dut.rst_n.value = 1
+    await Timer(2, unit="ms")
+    assert int(dut.uo_out.value) == 0
+
+
+@cocotb.test()
+async def absolute_encoder_range_fault(dut):
+    await initialize(dut)
+    # Deliberately cross +4095 -> -4096 using legal transitions while disabled.
+    # Port-level test also runs against a flattened gate-level netlist.
+    for index in range(4096):
+        phase = (1, 3, 2, 0)[index % 4]
+        set_input(dut, 3, phase >> 1)
+        set_input(dut, 4, phase & 1)
+        await Timer(1, unit="us")
+    assert int(dut.uo_out.value) == 0x20
+    assert await spi_frame(dut, 0) == 0x1000
+
+    # Negative endpoint itself is valid; one further decrement must fault.
+    dut.rst_n.value = 0
+    await Timer(1, unit="us")
+    dut.rst_n.value = 1
+    await Timer(1, unit="us")
+    for index in range(4096):
+        phase = (2, 3, 1, 0)[index % 4]
+        set_input(dut, 3, phase >> 1)
+        set_input(dut, 4, phase & 1)
+        await Timer(1, unit="us")
+    assert int(dut.uo_out.value) == 0
+    set_input(dut, 3, 1)  # 00 -> 10 decrements once more and wraps
+    await Timer(1, unit="us")
+    assert int(dut.uo_out.value) == 0x20
+    set_input(dut, 5, 1)
+    await spi_frame(dut, 0x8001)
+    await Timer(1, unit="ms")
+    assert int(dut.uo_out.value) == 0x20
+
+
+@cocotb.test()
+async def full_speed_and_default_limits(dut):
+    await initialize(dut)
+    motor = MotorModel(dut)
+    cocotb.start_soon(motor.run())
+    await spi_frame(dut, 0xC03F)
+    await spi_frame(dut, 0x8000 | 1200)
+    set_input(dut, 5, 1)
+    await wait_settled(dut, timeout_us=400000)
+    assert motor.position == 1200
+    gaps = [b-a for a, b in zip(motor.rises, motor.rises[1:])]
+    assert min(gaps) >= 100000, "exceeded 10 kHz cap"
+    assert gaps.count(100000) > 5, "did not exercise the 10 kHz ceiling"
+    # Lowest velocity/acceleration codes exercise the Q16 low-acceleration path
+    # through SPI, planning, PI and actual encoder feedback.
+    await spi_frame(dut, 0xC000)
+    await spi_frame(dut, 0x8000 | 1201)
+    await wait_settled(dut, timeout_us=300000)
+    assert motor.position == 1201
+    assert motor.widths and min(motor.widths) >= 5000
