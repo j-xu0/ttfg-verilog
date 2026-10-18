@@ -1,47 +1,37 @@
-![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg) ![](../../workflows/fpga/badge.svg)
+![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg)
 
-# Tiny Tapeout 8-bit Programmable Counter
+# Tiny Tapeout GF180 Stepper Motor Controller
 
-- [Read the project documentation](docs/info.md)
+A staged implementation of the ECE298A stepper-driver proposal. The intended
+controller receives signed target positions over SPI, plans trapezoidal motion,
+and uses quadrature feedback and a PI controller to drive an external STEP/DIR
+motor driver.
 
-An 8-bit binary up-counter with asynchronous active-low reset, synchronous
-parallel load, modulo-256 wraparound, and tri-state output control. The project
-targets the GF180MCU process through the Tiny Tapeout `ttgf26a` GitHub Actions
-flow.
+**Stage 1 is implemented:** mode-0 SPI, TARGET/CONTROL/PLAN registers, synchronized
+quadrature decoding, fault reporting, and Tiny Tapeout integration. Motor outputs
+remain inactive. This is an interface milestone, not a complete motor controller
+or a tapeout-ready design.
 
-## What is Tiny Tapeout?
+- [Interface, pinout, and timing](docs/info.md)
+- [Implementation steps and unresolved proposal details](docs/implementation.md)
+- [Running the tests](test/README.md)
 
-Tiny Tapeout is an educational project that aims to make it easier and cheaper than ever to get your digital and analog designs manufactured on a real chip.
+The top module is `tt_um_j_xu0_stepper`. The GF180 build uses `gf180mcuD` and the
+repository's existing `ttgf26a` workflow. The system clock target is **10 MHz**;
+`info.yaml` and the 100 ns constraint in `src/config.json` agree. The 1x1 tile
+allocation is provisional until the complete design is hardened.
 
-To learn more and get started, visit https://tinytapeout.com.
+With Python, Icarus Verilog, and make installed, run from the repository root:
 
-## Set up your Verilog project
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r test/requirements.txt
+python -m pytest test/test_spi.py test/test_encoder.py -q
+make -C test -B
+```
 
-1. Add your Verilog files to the `src` folder.
-2. Edit the [info.yaml](info.yaml) and update information about your project, paying special attention to the `source_files` and `top_module` properties. If you are upgrading an existing Tiny Tapeout project, check out our [online info.yaml migration tool](https://tinytapeout.github.io/tt-yaml-upgrade-tool/).
-3. Edit [docs/info.md](docs/info.md) and add a description of your project.
-4. Adapt the testbench to your design. See [test/README.md](test/README.md) for more information.
-
-The GitHub action will automatically build the ASIC files using [LibreLane](https://www.zerotoasiccourse.com/terminology/librelane/).
-
-## Enable GitHub actions to build the results page
-
-- [Enabling GitHub Pages](https://tinytapeout.com/faq/#my-github-action-is-failing-on-the-pages-part)
-
-## Resources
-
-- [FAQ](https://tinytapeout.com/faq/)
-- [Digital design lessons](https://tinytapeout.com/digital_design/)
-- [Learn how semiconductors work](https://tinytapeout.com/siliwiz/)
-- [Join the community](https://tinytapeout.com/discord)
-- [Build your design locally](https://www.tinytapeout.com/guides/local-hardening/)
-
-## What next?
-
-- [Submit your design to the next shuttle](https://app.tinytapeout.com/).
-- Edit [this README](README.md) and explain your design, how it works, and how to test it.
-- Share your project on your social network of choice:
-  - LinkedIn [#tinytapeout](https://www.linkedin.com/search/results/content/?keywords=%23tinytapeout) [@TinyTapeout](https://www.linkedin.com/company/100708654/)
-  - Mastodon [#tinytapeout](https://chaos.social/tags/tinytapeout) [@matthewvenn](https://chaos.social/@matthewvenn)
-  - X (formerly Twitter) [#tinytapeout](https://twitter.com/hashtag/tinytapeout) [@tinytapeout](https://twitter.com/tinytapeout)
-  - Bluesky [@tinytapeout.com](https://bsky.app/profile/tinytapeout.com)
+The test workflow runs both unit and integration simulations. The separate GDS
+workflow performs GF180 hardening, precheck, and gate-level simulation when run
+on GitHub. Local RTL simulation does not establish post-layout timing or physical
+verification results.
