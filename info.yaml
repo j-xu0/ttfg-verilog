@@ -21,8 +21,7 @@ project:
     - "stepper_spi.v"
     - "quadrature_decoder.v"
     - "control_timebase.v"
-    - "compact_motion_planner.v"
-    - "pi_controller.v"
+    - "shared_motion_controller.v"
     - "step_dir_generator.v"
 
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
