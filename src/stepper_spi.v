@@ -35,6 +35,14 @@ module stepper_spi (
 
     assign miso = active && !cs_sync ? tx_shift[15] : 1'b0;
 
+    // All 16 receive bits are overwritten before a frame may commit. Short,
+    // empty, overlong and reset-aborted frames never expose this scratch data,
+    // so it needs neither a reset tree nor a frame-start clear mux.
+    always @(posedge clk) begin
+        if (active && !cs_sync && !sclk_last && sclk_sync)
+            rx_shift <= {rx_shift[14:0], mosi_sync};
+    end
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             sclk_meta <= 1'b0;
@@ -50,7 +58,6 @@ module stepper_spi (
             active <= 1'b0;
             busy_seen <= 1'b0;
             bit_count <= 5'd0;
-            rx_shift <= 16'd0;
             tx_shift <= 16'd0;
             target <= 13'sd0;
             control <= 4'd0;
@@ -80,7 +87,6 @@ module stepper_spi (
                 active <= 1'b1;
                 busy_seen <= busy;
                 bit_count <= 5'd0;
-                rx_shift <= 16'd0;
                 tx_shift <= {1'b0, busy, at_target, fault, 12'd0};
             end else if (!cs_last && cs_sync) begin
                 active <= 1'b0;
@@ -109,7 +115,6 @@ module stepper_spi (
             end else if (active && !cs_sync) begin
                 busy_seen <= busy_seen || busy;
                 if (!sclk_last && sclk_sync) begin
-                    rx_shift <= {rx_shift[14:0], mosi_sync};
                     // Saturation ensures even a very long frame cannot wrap
                     // the counter back to the valid length.
                     if (bit_count < 17)

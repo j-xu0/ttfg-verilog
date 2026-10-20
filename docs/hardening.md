@@ -47,7 +47,7 @@ rerun hardening, precheck, and gate-level tests against the new allocation.
 ## Current mandatory 1x1 implementation
 
 `info.yaml` is restored to 1x1. The new serial/LUT optimizations cut controlled
-GF180 cell area 49.3%, to 71,420.832 um², but that still exceeds the 51,966.970 um²
+GF180 cell area 56.5%, to 61,318.522 um², but that still exceeds the 51,966.970 um²
 core. See [the current area results](area-optimization.md). No successful 3x2
 run or generic RTL check establishes 1x1 fit. Further architectural reduction
 and a passing 1x1 physical run are still required.

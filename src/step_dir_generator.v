@@ -80,12 +80,16 @@ module step_dir_generator #(
     localparam integer PHASE_BITS = PHASE_LIMIT > 1 ? $clog2(PHASE_LIMIT) : 1;
     localparam integer LOW_MAX = (STEP_LOW_CYCLES > DIR_HOLD_CYCLES ?
                                   STEP_LOW_CYCLES : DIR_HOLD_CYCLES) - 1;
-    localparam integer LOW_BITS = LOW_MAX > 0 ? $clog2(LOW_MAX+1) : 1;
-    localparam integer HIGH_BITS = STEP_HIGH_CYCLES > 1 ? $clog2(STEP_HIGH_CYCLES) : 1;
+    localparam integer PULSE_MAX = STEP_HIGH_CYCLES-1 > LOW_MAX ?
+                                      STEP_HIGH_CYCLES-1 : LOW_MAX;
+    localparam integer PULSE_BITS = PULSE_MAX > 0 ? $clog2(PULSE_MAX+1) : 1;
     localparam integer DIR_MAX = DIR_SETUP_CYCLES-1;
-    localparam integer DIR_BITS = DIR_MAX > 0 ? $clog2(DIR_MAX+1) : 1;
     localparam integer ENABLE_MAX = ENABLE_SETUP_CYCLES-1;
-    localparam integer ENABLE_BITS = ENABLE_MAX > 0 ? $clog2(ENABLE_MAX+1) : 1;
+    localparam integer SETUP_MAX = DIR_MAX > ENABLE_MAX ? DIR_MAX : ENABLE_MAX;
+    localparam integer SETUP_BITS = SETUP_MAX > 0 ? $clog2(SETUP_MAX+1) : 1;
+    wire command_limited = velocity_command[20] ?
+        $signed(velocity_command) < -$signed(MAX_COMMAND) :
+        $signed(velocity_command) > $signed(MAX_COMMAND);
     wire [20:0] magnitude = velocity_command[20] ?
         (~velocity_command + 21'd1) : velocity_command;
     wire [20:0] bounded_magnitude = magnitude > MAX_COMMAND ? MAX_COMMAND : magnitude;
@@ -93,10 +97,12 @@ module step_dir_generator #(
     wire active = rst_n && enable && !fault;
     reg pulse;
     reg [PHASE_BITS-1:0] phase;
-    reg [HIGH_BITS-1:0] high_left;
-    reg [LOW_BITS-1:0] low_age;
-    reg [DIR_BITS-1:0] dir_age;
-    reg [ENABLE_BITS-1:0] enable_age;
+    // High time and fall-to-rise/hold time are mutually exclusive. Keep one
+    // countdown: high time while pulse is set, low/hold time otherwise.
+    reg [PULSE_BITS-1:0] pulse_left;
+    // The next event waits for both enable and direction setup. Their maximum
+    // remaining delay is sufficient; a direction change extends that maximum.
+    reg [SETUP_BITS-1:0] setup_left;
     reg timing_limited;
     localparam integer FRACTION_BITS = trailing_zero_bits(PHASE_LIMIT);
     localparam [63:0] HIGH_LIMIT = PHASE_LIMIT >> FRACTION_BITS;
@@ -112,11 +118,31 @@ module step_dir_generator #(
         // word only needs an increment and equality test instead of a wide
         // threshold subtraction. The concatenation preserves the same phase.
         localparam integer HIGH_BITS = PHASE_BITS - FRACTION_BITS;
-        wire [FRACTION_BITS:0] fractional_sum =
+        // Fold the absolute-value +1 into the accumulator carry input. The
+        // direct signed range check avoids a separate magnitude comparator.
+        // Other scale/modulus cases retain the general exact increment.
+        wire [FRACTION_BITS-1:0] signed_command = $signed(velocity_command);
+        wire [FRACTION_BITS-1:0] addend = command_limited ?
+            MAX_COMMAND : signed_command ^
+                                  {FRACTION_BITS{velocity_command[20]}};
+        wire [FRACTION_BITS:0] fractional_sum = INCREMENT_SCALE == 1 &&
+            MAX_INCREMENT < (64'd1 << FRACTION_BITS) ?
+            {1'b0, phase[FRACTION_BITS-1:0]} + {1'b0, addend} +
+                (velocity_command[20] && !command_limited) :
             {1'b0, phase[FRACTION_BITS-1:0]} + increment;
         wire [HIGH_BITS-1:0] high = phase[PHASE_BITS-1:FRACTION_BITS];
-        wire [HIGH_BITS-1:0] high_next = phase_event ? {HIGH_BITS{1'b0}} :
-            high + fractional_sum[FRACTION_BITS];
+        wire [HIGH_BITS-1:0] advanced_high = high + fractional_sum[FRACTION_BITS];
+        wire [HIGH_BITS-1:0] high_next;
+        genvar bit_index;
+        // On a wrap, advanced_high equals HIGH_LIMIT. Only its set bits
+        // need clearing; all other bits already have their required zero.
+        for (bit_index=0; bit_index<HIGH_BITS; bit_index=bit_index+1) begin : high_reset
+            if ((HIGH_LIMIT >> bit_index) & 1) begin
+                assign high_next[bit_index] = advanced_high[bit_index] && !phase_event;
+            end else begin
+                assign high_next[bit_index] = advanced_high[bit_index];
+            end
+        end
         assign phase_event = fractional_sum[FRACTION_BITS] && high == HIGH_LIMIT-1;
         assign phase_next = {high_next, fractional_sum[FRACTION_BITS-1:0]};
     end else begin : general_phase
@@ -130,59 +156,53 @@ module step_dir_generator #(
     end endgenerate
     assign step = active && pulse;
     assign driver_enable = active;
-    assign rate_limited = active && ((magnitude > MAX_COMMAND) || timing_limited);
+    assign rate_limited = active && (command_limited || timing_limited);
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             pulse <= 1'b0;
             dir <= 1'b0;
             phase <= 0;
-            high_left <= 0;
-            low_age <= LOW_MAX;
-            dir_age <= 0;
-            enable_age <= 0;
+            pulse_left <= 0;
+            setup_left <= SETUP_MAX;
             timing_limited <= 0;
         end else if (!enable || fault) begin
             pulse <= 1'b0;
             dir <= 1'b0;
             phase <= 0;
-            high_left <= 0;
-            low_age <= LOW_MAX;
-            dir_age <= 0;
-            enable_age <= 0;
+            pulse_left <= 0;
+            setup_left <= SETUP_MAX;
             timing_limited <= 0;
         end else begin
-            if (enable_age < ENABLE_MAX) enable_age <= enable_age + 1;
-            if (dir_age < DIR_MAX) dir_age <= dir_age + 1;
-            if (!pulse && low_age < LOW_MAX) low_age <= low_age + 1;
+            if (setup_left != 0) setup_left <= setup_left - 1;
+            if (pulse_left != 0) pulse_left <= pulse_left - 1;
             timing_limited <= 0;
             if (pulse) begin
-                if (high_left == 0) begin
+                if (pulse_left == 0) begin
                     pulse <= 0;
-                    low_age <= 0;
-                end else high_left <= high_left - 1;
+                    pulse_left <= LOW_MAX;
+                end
             end
 
-            if (magnitude == 0) begin
+            if (velocity_command == 0) begin
                 phase <= 0;
             end else if (dir != !velocity_command[20]) begin
                 // Finish the current pulse and hold direction beyond its fall.
                 phase <= 0;
-                if (!pulse && (DIR_HOLD_CYCLES <= 1 || low_age >= DIR_HOLD_CYCLES-1)) begin
+                if (!pulse && (DIR_HOLD_CYCLES <= 1 || pulse_left <= LOW_MAX-(DIR_HOLD_CYCLES-1))) begin
                     dir <= !velocity_command[20];
-                    dir_age <= 0;
+                    if (setup_left <= DIR_MAX+1) setup_left <= DIR_MAX;
                 end
-            end else if ((DIR_SETUP_CYCLES > 1 && dir_age < DIR_SETUP_CYCLES-1) ||
-                         (ENABLE_SETUP_CYCLES > 1 && enable_age < ENABLE_SETUP_CYCLES-1)) begin
+            end else if (setup_left != 0) begin
                 phase <= 0;
             end else begin
                 // Preserve fractional carry; discard physically unserviceable
                 // events instead of queuing pulses for a later burst.
                 if (phase_event) begin
                     phase <= phase_next;
-                    if (!pulse && (STEP_LOW_CYCLES <= 1 || low_age >= STEP_LOW_CYCLES-1)) begin
+                    if (!pulse && (STEP_LOW_CYCLES <= 1 || pulse_left <= LOW_MAX-(STEP_LOW_CYCLES-1))) begin
                         pulse <= 1;
-                        high_left <= STEP_HIGH_CYCLES-1;
+                        pulse_left <= STEP_HIGH_CYCLES-1;
                     end else timing_limited <= 1;
                 end else phase <= phase_next;
             end

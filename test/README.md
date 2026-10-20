@@ -16,7 +16,7 @@ Each suite contains many directed cases:
 - Timebase and planner: standalone motion-building-block tests described in
   [the motion-planning contract](../docs/motion-planning.md), including Q8/Q16
   equivalence and serial command preparation. The integrated compact planner
-  separately checks all 64profiles, sentinel bounds, stable-config mode, transient
+  separately checks all 64 profiles, sentinel bounds, stable-config mode, transient
   workspace sampling, mid-calculation aborts, and generated ROM reproducibility.
 - PI: all gains, signed endpoints, rounding, saturation/anti-windup, feedforward,
   clear/disable/reset, and seeded randomized arithmetic.
@@ -74,5 +74,5 @@ python3 scripts/measure_gf180_area.py --lib /path/to/gf180.lib --output /tmp/ste
 
 The script stores its synthesis commands, log, mapped netlist and area JSON;
 results include the Liberty and source hashes. It does not perform placement,
-routing, STA, or signoff. Current controlled full-top area is 71,420.832 um² and
+routing, STA, or signoff. Current controlled full-top area is 61,318.522 um² and
 still exceeds 1x1; see `docs/area-optimization.md`.

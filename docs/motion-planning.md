@@ -157,8 +157,8 @@ check displacement, acceleration, saturation, exact landing, timing and rate cou
 Port-level motor tests model legal encoder feedback, dropped steps and disturbances.
 This idealized digital model does not establish real motor stability or tuning.
 
-Controlled full-top GF180 standard-cell synthesis measures 71,420.832 um²,
-3000 cells and 415 flip-flops, a 49.3% area reduction from the original controller
+Controlled full-top GF180 standard-cell synthesis measures 61,318.522 um²,
+2,480 cells and 392 flip-flops, a 56.5% area reduction from the original controller
 under the same local mapping flow. The mandatory 1x1 core is only 51,966.970 um²,
 so this is still over budget. No 1x1 fit, post-route timing or physical-signoff
 claim follows from these results. See `area-optimization.md`.

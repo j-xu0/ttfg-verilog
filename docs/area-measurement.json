@@ -9,23 +9,73 @@
     "num_cells": 6288
   },
   "optimized": {
+    "area": 61318.5216,
+    "sequential_area": 27005.3504,
+    "num_cells": 2480
+  },
+  "baseline_flip_flops": 586,
+  "optimized_flip_flops": 392,
+  "area_reduction_percent": 56.45742077286402,
+  "failed_run_1x1_core_area": 51966.97,
+  "optimized_sources_sha256": {
+    "compact_motion_planner.v": "912071d0e355effd2967e81a3af39c3867e9f5d2892116ca7786b8dde097b89d",
+    "control_timebase.v": "8424b0958b312c9a94a2b407cd2e70f48628e760cc9dcfb1cc9ef6cc9d6aa244",
+    "motion_planner.v": "6095312cf6e0aecd3edd818f69c171f8d1a06bb17c9b187d0c5ffda592c1c984",
+    "pi_controller.v": "d434561666fc1056b2c2e86a685ef8d8c7c820c54474a35ee44da3f7cc1f9576",
+    "project.v": "7e4e07f4ed37e8f2b40366fde38c0744273cac7bad8745a32a8172e1a5ab4b91",
+    "quadrature_decoder.v": "e2e3a3a879077115bcd695b0b78746a84c597c557a01bc008e2af326ed9c8314",
+    "step_dir_generator.v": "be1557b0d5792bcc3b0ea47d0b1c0edd97846b4bd2d428b25f13ffd397726673",
+    "stepper_spi.v": "35ad5aceb1636116ee8c42755b53f23f1e98aaff36affac6346b58166a5c525d",
+    "plan_lut.vh": "19d914cbf0f5ebfa8429b4d3bdf0fe536d876f7bfdf33131a987b990e2f3100a"
+  },
+  "previous_optimization_commit": "b6c5a903f7f453426d74faf2c334aad6eaa0dde3",
+  "previous_optimized": {
     "area": 71420.832,
     "sequential_area": 28783.4624,
     "num_cells": 3000
   },
-  "baseline_flip_flops": 586,
-  "optimized_flip_flops": 415,
-  "area_reduction_percent": 49.28372122024599,
-  "failed_run_1x1_core_area": 51966.97,
-  "optimized_sources_sha256": {
-    "compact_motion_planner.v": "5a2071f35907340ab5ba9b5a48773cd5c37b058b75e1686ee8b7f36715c8d2ef",
-    "control_timebase.v": "8424b0958b312c9a94a2b407cd2e70f48628e760cc9dcfb1cc9ef6cc9d6aa244",
-    "motion_planner.v": "6095312cf6e0aecd3edd818f69c171f8d1a06bb17c9b187d0c5ffda592c1c984",
-    "pi_controller.v": "3adf1116180f39bb2f5c545a8e1bc36aadeab10298faa29fc36a095622a7bf52",
-    "project.v": "7e4e07f4ed37e8f2b40366fde38c0744273cac7bad8745a32a8172e1a5ab4b91",
-    "quadrature_decoder.v": "8553bedf6a1b8da081e927da011c4566865f6127a2e61431ab18b017e0be4d66",
-    "step_dir_generator.v": "2f70e65d2f9a14b6cfddf2461e55b3a2dc6cd0da0b88889abd0a9c3a4ae474cb",
-    "stepper_spi.v": "fcde53e2597e8fd23b8715bcb3cc29d82c1cebdaf91b1b91724dd945cd07c1d2",
-    "plan_lut.vh": "19d914cbf0f5ebfa8429b4d3bdf0fe536d876f7bfdf33131a987b990e2f3100a"
+  "previous_optimized_flip_flops": 415,
+  "audit_area_reduction_percent": 14.144767173812811,
+  "previous_ci_1x1": {
+    "commit": "b6c5a903f7f453426d74faf2c334aad6eaa0dde3",
+    "movable_area": 71258.387,
+    "pin_adjusted_movable_area": 83663.587,
+    "core_area": 51966.97,
+    "utilization_percent": 165.87,
+    "failure": "GPL-0301",
+    "run_url": "https://github.com/j-xu0/ttfg-verilog/actions/runs/39381917386"
+  },
+  "standalone_audit": {
+    "compact_motion_planner": {
+      "before": 29420.0704,
+      "after": 24013.2928,
+      "parameters": {
+        "STABLE_CONFIG": 1
+      }
+    },
+    "pi_controller": {
+      "before": 18259.6736,
+      "after": 16595.712,
+      "parameters": {
+        "SERIAL": 1,
+        "STABLE_CONFIG": 1
+      }
+    },
+    "step_dir_generator": {
+      "before": 10716.9664,
+      "after": 8308.832
+    },
+    "stepper_spi": {
+      "before": 7347.3344,
+      "after": 6901.7088
+    },
+    "quadrature_decoder": {
+      "before": 3422.3168,
+      "after": 2820.832
+    },
+    "control_timebase": {
+      "before": 1865.92,
+      "after": 1865.92
+    }
   }
 }

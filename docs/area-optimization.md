@@ -13,13 +13,13 @@ strategy, so compare its baseline and optimized result with each other.
 
 | Metric | Baseline | Optimized |
 | --- | ---: | ---: |
-| Mapped cell area (um²) | 140,824.2752 | 71,420.8320 |
-| Sequential cell area (um²) | 39,823.1232 | 28,783.4624 |
-| Mapped cells | 6,288 | 3,000 |
-| Flip-flops | 586 | 415 |
+| Mapped cell area (um²) | 140,824.2752 | 61,318.5216 |
+| Sequential cell area (um²) | 39,823.1232 | 27,005.3504 |
+| Mapped cells | 6,288 | 2,480 |
+| Flip-flops | 586 | 392 |
 
-Cell area falls **49.3%**. The failed 1x1 run's core area was 51,966.970 um²;
-optimized cells alone still occupy 137.4% of that, without fixed-cell, pin-density,
+Cell area falls **56.5%**. The failed 1x1 run's core area was 51,966.970 um²;
+optimized cells alone still occupy 118.0% of that, without fixed-cell, pin-density,
 routing or clock-tree headroom. Raising placement density cannot resolve this
 capacity mismatch. The earlier passing 3x2 result does not satisfy the requirement.
 
@@ -27,6 +27,12 @@ The small [measurement record](area-measurement.json) includes source and Libert
 hashes. `scripts/measure_gf180_area.py` reproduces the synthesis procedure and
 writes detailed logs/netlists outside the source checkout. It accepts `--top`
 and `--parameter NAME=value` for module comparisons.
+
+The follow-up audit reduces the previous 71,420.8320 um² result by a further
+**14.1%**, preserving the same behavior and Q16 arithmetic. See the
+[module audit and tradeoffs](area-audit.md) for the measured changes and rejected
+experiments. CI on the previous `b6c5a90` source confirmed 165.870% placement
+utilization (`GPL-0301`); these new local measurements are not a physical fit.
 
 ## Implemented changes
 
@@ -53,7 +59,7 @@ and `--parameter NAME=value` for module comparisons.
    the new endpoint because encoder updates are at most one count. Configuration
    lookup definitions are shared with the generated planner constants.
 
-Planner work completes within 700 system clocks and PI work within 450clocks;
+Planner work completes within 700 system clocks and PI work within 450 clocks;
 the control period is 10,000 clocks at the unchanged 10 MHz target. Intermediate
 planner outputs are invalid while calculating. PI samples the prior completed
 reference on the same edge the next planner calculation starts, preserving the
@@ -62,7 +68,7 @@ period, so the entire controller is not claimed cycle-identical to the old RTL.
 
 ## Verification and remaining work
 
-Module tests cover all 64profiles, both directions and signed endpoints, exact
+Module tests cover all 64 profiles, both directions and signed endpoints, exact
 finite-sum reference models, generated ROM reproducibility, reachable-range
 sentinels, all PI gains and randomized arithmetic, input stability contracts,
 ignored in-flight ticks and aborts. STEP tests compare each cycle with an

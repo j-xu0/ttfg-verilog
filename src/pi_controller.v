@@ -103,7 +103,7 @@ module pi_controller #(
         reg [1:0] saved_kp, saved_ki;
         reg error_negative, integral_negative, feedforward_negative;
         reg integral_phase, overflow, low_sign, negative, clipped;
-        reg pending_saturated, busy;
+        reg pending_saturated;
         wire [19:0] limit = STABLE_CONFIG ? max_velocity : saved_limit;
         wire [1:0] kp = STABLE_CONFIG ? kp_select : saved_kp;
         wire [1:0] ki = STABLE_CONFIG ? ki_select : saved_ki;
@@ -129,124 +129,120 @@ module pi_controller #(
         wire [1:0] difference = {1'b0, magnitude_bit} + {1'b0, ~limit_bit}
                                 + {1'b0, carry[0]};
         wire limit_signed_bit = negative ? (~limit_bit ^ carry[0]) : limit_bit;
-        wire signed [29:0] reference_wide = {reference_position[28], reference_position};
-        wire signed [29:0] measured_wide = {measured_position[12], measured_position, 16'b0};
-        assign calculating = busy;
+        wire signed [13:0] error_integer =
+            $signed({reference_position[28], reference_position[28:16]}) -
+            $signed({measured_position[12], measured_position});
+        assign calculating = state != IDLE;
+        wire sample = state == IDLE && tick;
+        wire windup = clipped && negative == error_negative;
+        wire compare_clipped = difference[1] && (comparison[0] || difference[0]);
 
+        // Only architecturally visible state requires reset or abort gating.
+        // Scratch values can continue on an abort edge; the next accepted sample
+        // overwrites them before use. Keeping this separate also avoids a reset
+        // and enable mux on every bit of the sampled error and work rings.
         always @(posedge clk or negedge rst_n) begin
             if (!rst_n) begin
                 integral <= 0;
                 velocity_command <= 0;
                 saturated <= 0;
                 state <= IDLE;
-                busy <= 0;
             end else if (clear || !enable) begin
                 integral <= 0;
                 velocity_command <= 0;
                 saturated <= 0;
                 state <= IDLE;
-                busy <= 0;
-            end else case (state)
-                IDLE: if (tick) begin
-                    busy <= 1;
-                    error_ring <= reference_wide - measured_wide;
-                    work <= feedforward_velocity;
-                    saved_limit <= max_velocity;
-                    saved_kp <= kp_select;
-                    saved_ki <= ki_select;
-                    integral_negative <= integral[20];
-                    feedforward_negative <= feedforward_velocity[20];
-                    integral_phase <= 0;
-                    carry <= 0;
-                    bit_count <= 0;
-                    overflow <= 0;
-                    // Capture sign on the following clock, after subtraction.
-                    state <= SAMPLE_READY;
-                end
-                SAMPLE_READY: begin
-                    error_negative <= error_ring[29];
-                    state <= SUM;
-                end
-                SUM: begin
+            end else begin
+                case (state)
+                    IDLE: if (tick) state <= SAMPLE_READY;
+                    SAMPLE_READY: state <= SUM;
+                    SUM: if (bit_count == 30) state <= SUM_DONE;
+                    SUM_DONE: state <= CLAMP;
+                    CLAMP: state <= overflow ? FILL_START : COMPARE_START;
+                    COMPARE_START: state <= COMPARE;
+                    COMPARE: if (bit_count == 20)
+                        state <= compare_clipped ? FILL_START : CLAMP_DONE;
+                    FILL_START: state <= FILL_LIMIT;
+                    FILL_LIMIT: if (bit_count == 20) state <= CLAMP_DONE;
+                    CLAMP_DONE: if (!integral_phase)
+                        state <= windup ? CLAMP : SUM;
+                    else state <= PUBLISH;
+                    PUBLISH: begin
+                        velocity_command <= work;
+                        saturated <= pending_saturated;
+                        state <= IDLE;
+                    end
+                    default: state <= IDLE;
+                endcase
+                if (state == SUM && bit_count < 21)
+                    integral <= {integral_phase ? sum[0] : integral[0], integral[20:1]};
+                else if (state == COMPARE && integral_phase)
+                    integral <= {integral[0], integral[20:1]};
+                else if (state == FILL_LIMIT && integral_phase)
+                    integral <= {limit_signed_bit, integral[20:1]};
+            end
+        end
+
+        always @(posedge clk) begin
+            if (sample) begin
+                error_ring <= {error_integer, reference_position[15:0]};
+                work <= feedforward_velocity;
+                saved_limit <= max_velocity;
+                saved_kp <= kp_select;
+                saved_ki <= ki_select;
+                integral_negative <= integral[20];
+                feedforward_negative <= feedforward_velocity[20];
+                integral_phase <= 0;
+                carry <= 0;
+                bit_count <= 0;
+                overflow <= 0;
+            end else begin
+                if (state == SAMPLE_READY) error_negative <= error_ring[29];
+                if (state == SUM) begin
                     if (bit_count < 30)
                         error_ring <= {error_ring[0], error_ring[29:1]};
-                    if (bit_count < 21) begin
-                        if (integral_phase)
-                            integral <= {sum[0], integral[20:1]};
-                        else begin
-                            integral <= {integral[0], integral[20:1]};
-                            work <= {sum[0], work[20:1]};
-                        end
-                    end
+                    if (bit_count < 21 && !integral_phase)
+                        work <= {sum[0], work[20:1]};
                     if (bit_count == 20) low_sign <= sum[0];
                     if (bit_count > 20 && sum[0] != low_sign) overflow <= 1;
                     carry <= sum[2:1];
                     bit_count <= bit_count + 1'b1;
-                    if (bit_count == 30) begin
-                        negative <= sum[0];
-                        state <= SUM_DONE;
-                    end
+                    if (bit_count == 30) negative <= sum[0];
                 end
-                SUM_DONE: state <= CLAMP;
-                CLAMP: begin
-                    clipped <= overflow;
-                    state <= overflow ? FILL_START : COMPARE_START;
-                end
-                COMPARE_START: begin
+                if (state == CLAMP) clipped <= overflow;
+                if (state == COMPARE_START) begin
                     comparison <= 0;
                     bit_count <= 0;
                     carry <= 2'b11;
-                    state <= COMPARE;
                 end
-                COMPARE: begin
-                    if (integral_phase) integral <= {value[0], value[20:1]};
-                    else work <= {value[0], value[20:1]};
+                if (state == COMPARE) begin
+                    if (!integral_phase) work <= {work[0], work[20:1]};
                     carry <= {negative && (~value[0] & carry[1]), difference[1]};
                     comparison <= {1'b0, comparison[0] | difference[0]};
                     bit_count <= bit_count + 1'b1;
-                    if (bit_count == 20) begin
-                        clipped <= difference[1] && (comparison[0] || difference[0]);
-                        state <= difference[1] && (comparison[0] || difference[0])
-                            ? FILL_START : CLAMP_DONE;
-                    end
+                    if (bit_count == 20) clipped <= compare_clipped;
                 end
-                FILL_START: begin
+                if (state == FILL_START) begin
                     carry <= 1;
                     bit_count <= 0;
-                    state <= FILL_LIMIT;
                 end
-                FILL_LIMIT: begin
-                    if (integral_phase) integral <= {limit_signed_bit, value[20:1]};
-                    else work <= {limit_signed_bit, value[20:1]};
+                if (state == FILL_LIMIT) begin
+                    if (!integral_phase) work <= {limit_signed_bit, work[20:1]};
                     carry <= {1'b0, (~limit_bit & carry[0])};
                     bit_count <= bit_count + 1'b1;
-                    if (bit_count == 20) state <= CLAMP_DONE;
                 end
-                CLAMP_DONE: if (!integral_phase) begin
+                if (state == CLAMP_DONE && !integral_phase) begin
                     pending_saturated <= clipped;
                     integral_phase <= 1;
                     integral_negative <= integral[20];
-                    // A saturated command with error of the same sign freezes
-                    // integration, but its old value still obeys a reduced cap.
-                    if (clipped && negative == error_negative) begin
-                        negative <= integral[20];
-                        overflow <= 0;
-                        state <= CLAMP;
-                    end else begin
+                    overflow <= 0;
+                    if (windup) negative <= integral[20];
+                    else begin
                         carry <= 0;
                         bit_count <= 0;
-                        overflow <= 0;
-                        state <= SUM;
                     end
-                end else state <= PUBLISH;
-                PUBLISH: begin
-                    velocity_command <= work;
-                    saturated <= pending_saturated;
-                    busy <= 0;
-                    state <= IDLE;
                 end
-                default: begin state <= IDLE; busy <= 0; end
-            endcase
+            end
         end
     end endgenerate
 endmodule

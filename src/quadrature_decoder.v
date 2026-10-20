@@ -19,6 +19,19 @@ module quadrature_decoder (
     (* async_reg = "true" *) reg [1:0] ab_sync;
     reg [1:0] previous_ab;
     reg [1:0] startup_cycles;
+    wire [1:0] changed = previous_ab ^ ab_sync;
+    wire valid_edge = changed[1] ^ changed[0];
+    wire decrement = previous_ab[0] ^ ab_sync[1];
+    // Increment and decrement share the same toggle chain. A carry propagates
+    // through ones for +1 and through zeros for -1; only the direction bit
+    // differs. This avoids two independent 13-bit arithmetic paths.
+    wire [12:0] toggle;
+    assign toggle[0] = 1'b1;
+    genvar bit_index;
+    generate for (bit_index = 1; bit_index < 13; bit_index = bit_index + 1) begin : count_toggle
+        assign toggle[bit_index] = toggle[bit_index-1] &
+                                   (position[bit_index-1] ^ decrement);
+    end endgenerate
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -38,15 +51,10 @@ module quadrature_decoder (
                 previous_ab <= ab_sync;
             end else begin
                 previous_ab <= ab_sync;
-                case ({previous_ab, ab_sync})
-                    4'b0001, 4'b0111, 4'b1110, 4'b1000:
-                        position <= position + 13'sd1;
-                    4'b0010, 4'b1011, 4'b1101, 4'b0100:
-                        position <= position - 13'sd1;
-                    4'b0011, 4'b1100, 4'b0110, 4'b1001:
-                        fault <= 1'b1;
-                    default: begin end // Holding the same phase is valid.
-                endcase
+                if (valid_edge)
+                    position <= position ^ toggle;
+                else if (&changed)
+                    fault <= 1'b1;
             end
         end
     end

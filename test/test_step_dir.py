@@ -295,7 +295,8 @@ async def nco_old_algorithm_equivalence(dut):
         assert int(dut.phase.value) * factor == model.phase
 
 
-@pytest.mark.parametrize("configuration", ["production", "coprime", "one_cycle", "blocked", "unit_threshold", "small_split"])
+@pytest.mark.parametrize("configuration", ["production", "coprime", "one_cycle", "blocked", "unit_threshold", "small_split",
+                                         "long_direction_setup", "wide_fraction"])
 def test_step_dir_exact_nco(tmp_path, configuration):
     from cocotb_tools.runner import get_runner
     root = Path(__file__).resolve().parents[1]
@@ -311,6 +312,14 @@ def test_step_dir_exact_nco(tmp_path, configuration):
                       DIR_SETUP_CYCLES=1, DIR_HOLD_CYCLES=1, ENABLE_SETUP_CYCLES=1)
         if configuration == "blocked":
             params.update(STEP_HIGH_CYCLES=13, STEP_LOW_CYCLES=11)
+    elif configuration == "long_direction_setup":
+        # Exercise shared timers when direction setup exceeds enable setup,
+        # STEP low exceeds direction hold, and high time needs a wider word.
+        params.update(CLOCK_HZ=100000, STEP_HIGH_CYCLES=17, STEP_LOW_CYCLES=9,
+                      DIR_SETUP_CYCLES=12, DIR_HOLD_CYCLES=3, ENABLE_SETUP_CYCLES=4)
+    elif configuration == "wide_fraction":
+        # The fused signed increment must sign-extend beyond the 21-bit input.
+        params.update(CLOCK_HZ=40000000)
     elif configuration == "small_split":
         # Reduced threshold 10 = 5*2 exercises the split path with a one-bit
         # fractional word, maximum increment equal to its modulus, and an

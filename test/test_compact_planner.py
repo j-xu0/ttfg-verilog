@@ -6,9 +6,11 @@ import pytest
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import Timer
+from cocotb.utils import get_sim_time
 
 VELOCITIES = (6554,13107,32768,65536,131072,262144,458752,655360)
 ACCELS = (33,66,131,328,655,1311,3277,6554)
+MAX_CALCULATION_CYCLES = 0
 
 def signed(signal):
     value = int(signal.value)
@@ -53,6 +55,7 @@ async def command(dut,origin,target,code):
     assert int(dut.done.value)==int(origin==target)
 
 async def move(dut,origin,target,code,disturb=False):
+    global MAX_CALCULATION_CYCLES
     await command(dut,origin,target,code)
     if origin==target:
         await cycle(dut); assert not int(dut.done.value); return
@@ -69,6 +72,7 @@ async def move(dut,origin,target,code,disturb=False):
         # Tick gaps preserve the settled reference.
         if index%9==0:
             await cycle(dut,3); assert snapshot(dut)==old
+        calculation_started = get_sim_time(unit='ns')
         dut.tick.value=1
         await cycle(dut)
         dut.tick.value=0
@@ -84,6 +88,9 @@ async def move(dut,origin,target,code,disturb=False):
         while int(dut.calculating.value):
             await cycle(dut,10); elapsed+=10
             assert elapsed<700
+        calculation_cycles = (get_sim_time(unit='ns') - calculation_started) // 10
+        MAX_CALCULATION_CYCLES = max(MAX_CALCULATION_CYCLES, calculation_cycles)
+        assert calculation_cycles < 700
         actual=snapshot(dut)
         expected=oracle(old[0],old[1],goal,vmax,accel)
         assert actual==expected,(origin,target,code,index,actual,expected)
@@ -134,6 +141,7 @@ async def compact_contract(dut):
         dut.enable.value=1; dut.rst_n.value=1
         await cycle(dut)
         await move(dut,-2,2,24)
+    dut._log.info('Maximum observed calculation latency: %s clocks', MAX_CALCULATION_CYCLES)
 
 
 @pytest.mark.parametrize("stable_config", [0, 1])
