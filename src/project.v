@@ -21,7 +21,7 @@ module tt_um_j_xu0_stepper (
   wire [5:0] plan;
   wire miso, encoder_fault, write_pulse, reject_pulse, target_write_pulse;
   (* async_reg = "true" *) reg enable_meta, enable_sync;
-  reg signed [12:0] previous_position;
+  reg previous_sign;
   reg range_fault;
   reg command_pending, active, armed, settled;
   reg [1:0] settle_count;
@@ -32,44 +32,21 @@ module tt_um_j_xu0_stepper (
   wire at_target = settled && !active && !command_pending && run_allowed
                    && position == target;
   wire launch = run_allowed && command_pending && !active;
-  wire control_ce, planner_busy, planner_done;
+  wire control_ce, planner_busy, planner_done, planner_calculating, pi_calculating;
   wire signed [28:0] reference_position;
   wire signed [20:0] reference_velocity, velocity_command;
-  wire target_reached = active && !planner_busy
-      && reference_position == $signed({target, 16'b0}) && position == target;
-  reg [19:0] velocity_limit, acceleration_limit;
-
-  // Explicit implementation lookup choices; Q16 steps/tick and steps/tick^2.
-  // Rounded from 100,200,500,1000,2000,4000,7000,10000 steps/s and
-  // 500,1000,2000,5000,10000,20000,50000,100000 steps/s^2 at 1 kHz.
-  always @* begin
-    case (plan[2:0])
-      0: velocity_limit = 20'd6554;
-      1: velocity_limit = 20'd13107;
-      2: velocity_limit = 20'd32768;
-      3: velocity_limit = 20'd65536;
-      4: velocity_limit = 20'd131072;
-      5: velocity_limit = 20'd262144;
-      6: velocity_limit = 20'd458752;
-      default: velocity_limit = 20'd655360;
-    endcase
-    case (plan[5:3])
-      0: acceleration_limit = 20'd33;
-      1: acceleration_limit = 20'd66;
-      2: acceleration_limit = 20'd131;
-      3: acceleration_limit = 20'd328;
-      4: acceleration_limit = 20'd655;
-      5: acceleration_limit = 20'd1311;
-      6: acceleration_limit = 20'd3277;
-      default: acceleration_limit = 20'd6554;
-    endcase
-  end
+  // An idle planner for an armed move has completed at the latched TARGET.
+  // Workspace outputs are deliberately invalid during serial calculations.
+  wire target_reached = active && !planner_busy && !planner_calculating
+      && position == target;
+  `include "plan_lut.vh"
+  wire [19:0] velocity_limit = profile_velocity(plan[2:0]);
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       enable_meta <= 0;
       enable_sync <= 0;
-      previous_position <= 0;
+      previous_sign <= 0;
       range_fault <= 0;
       command_pending <= 0;
       active <= 0;
@@ -79,11 +56,13 @@ module tt_um_j_xu0_stepper (
     end else begin
       enable_meta <= ui_in[5];
       enable_sync <= enable_meta;
-      previous_position <= position;
+      previous_sign <= position[12];
+      // Each encoder update is at most one count, so sign plus the new
+      // endpoint identifies either signed wrap without a second 13-bit counter.
       // Refuse wrap in the absolute coordinate system instead of making a
       // nearly full-range correction. Reset establishes a new zero reference.
-      if ((previous_position == 13'sd4095 && position == -13'sd4096) ||
-          (previous_position == -13'sd4096 && position == 13'sd4095))
+      if ((!previous_sign && position == -13'sd4096) ||
+          (previous_sign && position == 13'sd4095))
         range_fault <= 1;
       if (target_write_pulse)
         command_pending <= 1;
@@ -142,21 +121,25 @@ module tt_um_j_xu0_stepper (
   control_timebase timebase (
       .clk(clk), .rst_n(rst_n), .enable(run_allowed), .control_ce(control_ce)
   );
-  motion_planner #(.FRACTION_BITS(16), .LIMIT_WIDTH(20), .SERIAL_SETUP(1)) planner (
+  compact_motion_planner #(.STABLE_CONFIG(1)) planner (
       .clk(clk), .rst_n(rst_n), .tick(control_ce), .enable(run_allowed),
       .start(launch), .start_position(position), .target_position(target),
-      .max_velocity(velocity_limit), .acceleration(acceleration_limit),
+      .plan_code(plan),
       .reference_position(reference_position), .reference_velocity(reference_velocity),
-      .busy(planner_busy), .done(planner_done)
+      .busy(planner_busy), .done(planner_done), .calculating(planner_calculating)
   );
   wire pi_saturated, rate_limited;
-  pi_controller controller (
+  // SPI rejects configuration writes throughout active motion, so live gain
+  // and limit inputs stay stable until the serial controller is cleared.
+  pi_controller #(.SERIAL(1), .STABLE_CONFIG(1)) controller (
       .clk(clk), .rst_n(rst_n), .enable(run_allowed && active),
-      .clear(launch || target_reached), .tick(control_ce),
+      .clear(launch || target_reached),
+      .tick(control_ce && !planner_calculating && !pi_calculating),
       .reference_position(reference_position), .measured_position(position),
       .feedforward_velocity(reference_velocity), .max_velocity(velocity_limit),
       .kp_select(control[3:2]), .ki_select(control[1:0]),
-      .velocity_command(velocity_command), .saturated(pi_saturated)
+      .velocity_command(velocity_command), .saturated(pi_saturated),
+      .calculating(pi_calculating)
   );
   wire step, dir, driver_enable;
   step_dir_generator pulses (

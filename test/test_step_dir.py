@@ -148,5 +148,194 @@ def test_step_dir(tmp_path, single_cycle):
                  hdl_toplevel="step_dir_generator", parameters=params,
                  build_dir=tmp_path / "step_build", timescale=("1ns", "1ps"), always=True)
     runner.test(hdl_toplevel="step_dir_generator", test_module="test_step_dir",
+                test_filter="pulse_contract",
                 test_dir=Path(__file__).parent, extra_env={"STEP_TEST_PARAMS": json.dumps(params)},
                 results_xml=str(tmp_path / "step_results.xml"))
+
+
+class UnreducedNCO:
+    """Original full-unit phase algorithm, independent of RTL's GCD reduction."""
+    def __init__(self, params):
+        self.p = params
+        self.reset()
+
+    def reset(self):
+        self.pulse = self.direction = self.phase = self.high_left = 0
+        self.low_age = max(self.p["STEP_LOW_CYCLES"], self.p["DIR_HOLD_CYCLES"]) - 1
+        self.dir_age = self.enable_age = self.timing_limited = 0
+
+    def outputs(self, velocity, rst_n, enable, fault):
+        active = bool(rst_n and enable and not fault)
+        clamp = abs(velocity) > 65536 * self.p["MAX_STEP_HZ"] // self.p["CONTROL_HZ"]
+        return (int(active and self.pulse), self.direction, int(active),
+                int(active and (clamp or self.timing_limited)))
+
+    def edge(self, velocity, rst_n, enable, fault):
+        if not rst_n or not enable or fault:
+            self.reset()
+            return
+        p = self.p
+        old_pulse, old_low, old_dir, old_enable = (
+            self.pulse, self.low_age, self.dir_age, self.enable_age)
+        self.enable_age = min(old_enable + 1, p["ENABLE_SETUP_CYCLES"] - 1)
+        self.dir_age = min(old_dir + 1, p["DIR_SETUP_CYCLES"] - 1)
+        if not old_pulse:
+            self.low_age = min(old_low + 1, max(p["STEP_LOW_CYCLES"], p["DIR_HOLD_CYCLES"]) - 1)
+        self.timing_limited = 0
+        if old_pulse:
+            if self.high_left:
+                self.high_left -= 1
+            else:
+                self.pulse = 0
+                self.low_age = 0
+        if not velocity:
+            self.phase = 0
+        elif self.direction != (velocity > 0):
+            self.phase = 0
+            if not old_pulse and old_low >= p["DIR_HOLD_CYCLES"] - 1:
+                self.direction = int(velocity > 0)
+                self.dir_age = 0
+        elif old_dir < p["DIR_SETUP_CYCLES"] - 1 or old_enable < p["ENABLE_SETUP_CYCLES"] - 1:
+            self.phase = 0
+        else:
+            magnitude = min(abs(velocity), 65536 * p["MAX_STEP_HZ"] // p["CONTROL_HZ"])
+            # This intentionally retains the original unreduced multiplier and
+            # threshold, never reading the optimized RTL's arithmetic constants.
+            self.phase += magnitude * p["CONTROL_HZ"]
+            threshold = 65536 * p["CLOCK_HZ"]
+            if self.phase >= threshold:
+                self.phase -= threshold
+                if not old_pulse and old_low >= p["STEP_LOW_CYCLES"] - 1:
+                    self.pulse = 1
+                    self.high_left = p["STEP_HIGH_CYCLES"] - 1
+                else:
+                    self.timing_limited = 1
+
+
+@cocotb.test()
+async def nco_old_algorithm_equivalence(dut):
+    import math
+    import random
+    p = json.loads(os.environ["STEP_TEST_PARAMS"])
+    model = UnreducedNCO(p)
+    rng = random.Random(0x180DD5)
+    factor = math.gcd(65536 * p["CLOCK_HZ"], p["CONTROL_HZ"])
+    threshold = 65536 * p["CLOCK_HZ"] // factor
+    assert len(dut.phase) == max(1, (threshold - 1).bit_length())
+    dut.clk.value = 0
+    dut.rst_n.value = 0
+    dut.enable.value = 0
+    dut.fault.value = 0
+    command(dut, 0)
+    await cycle(dut)
+
+    def outputs():
+        return tuple(int(getattr(dut, name).value) for name in
+                     ("step", "dir", "driver_enable", "rate_limited"))
+
+    vectors = [(0, 0, 0, 0, 2)]
+    # Stable fractional phases, in-flight rate changes, reversal and zero.
+    for velocity in (98305, 700001, 1, 655359, 0, -98305, -(1 << 20), 0):
+        vectors.append((velocity, 1, 1, 0, 4500))
+    for _ in range(100):
+        velocity = rng.choice((0, 1, -1, 65536, -65536, 98305,
+                               -(1 << 20), (1 << 20)-1,
+                               rng.randint(-(1 << 20), (1 << 20)-1)))
+        rst_n = int(rng.randrange(25) != 0)
+        enable = int(rng.randrange(9) != 0)
+        fault = int(rng.randrange(11) == 0)
+        vectors.append((velocity, rst_n, enable, fault, rng.randint(1, 1600)))
+
+    for velocity, rst_n, enable, fault, count in vectors:
+        command(dut, velocity)
+        dut.rst_n.value = rst_n
+        dut.enable.value = enable
+        dut.fault.value = fault
+        if not rst_n:
+            model.reset()
+        await Timer(1, unit="ns")
+        assert outputs() == model.outputs(velocity, rst_n, enable, fault), "asynchronous gate mismatch"
+        for _ in range(count):
+            model.edge(velocity, rst_n, enable, fault)
+            await cycle(dut)
+            assert outputs() == model.outputs(velocity, rst_n, enable, fault)
+            assert int(dut.phase.value) * factor == model.phase
+
+
+    # Force each asynchronous abort while STEP is actually high. This also
+    # exercises reset between edges and checks the original phase on restart.
+    for signal in ("enable", "fault", "rst_n"):
+        velocity, rst_n, enable, fault = 655360, 1, 1, 0
+        command(dut, velocity)
+        dut.rst_n.value = 1
+        dut.enable.value = 1
+        dut.fault.value = 0
+        for _ in range(10000):
+            model.edge(velocity, rst_n, enable, fault)
+            await cycle(dut)
+            assert outputs() == model.outputs(velocity, rst_n, enable, fault)
+            assert int(dut.phase.value) * factor == model.phase
+            if int(dut.step.value):
+                break
+        else:
+            assert False, "failed to reach active pulse for safety abort"
+        if signal == "enable":
+            enable = 0
+        elif signal == "fault":
+            fault = 1
+        else:
+            rst_n = 0
+            model.reset()
+        getattr(dut, signal).value = {"enable": enable, "fault": fault, "rst_n": rst_n}[signal]
+        await Timer(1, unit="ns")
+        assert outputs() == model.outputs(velocity, rst_n, enable, fault)
+        model.edge(velocity, rst_n, enable, fault)
+        await cycle(dut)
+        assert outputs() == model.outputs(velocity, rst_n, enable, fault)
+        assert int(dut.phase.value) * factor == model.phase
+
+
+@pytest.mark.parametrize("configuration", ["production", "coprime", "one_cycle", "blocked", "unit_threshold", "small_split",
+                                         "long_direction_setup", "wide_fraction"])
+def test_step_dir_exact_nco(tmp_path, configuration):
+    from cocotb_tools.runner import get_runner
+    root = Path(__file__).resolve().parents[1]
+    params = dict(CLOCK_HZ=10000000, CONTROL_HZ=1000, MAX_STEP_HZ=10000,
+                  STEP_HIGH_CYCLES=50, STEP_LOW_CYCLES=50,
+                  DIR_SETUP_CYCLES=50, DIR_HOLD_CYCLES=50, ENABLE_SETUP_CYCLES=100)
+    if configuration == "coprime":
+        params.update(CLOCK_HZ=100003, CONTROL_HZ=997,
+                      STEP_HIGH_CYCLES=3, STEP_LOW_CYCLES=4,
+                      DIR_SETUP_CYCLES=5, DIR_HOLD_CYCLES=6, ENABLE_SETUP_CYCLES=7)
+    elif configuration in ("one_cycle", "blocked"):
+        params.update(CLOCK_HZ=100000, STEP_HIGH_CYCLES=1, STEP_LOW_CYCLES=1,
+                      DIR_SETUP_CYCLES=1, DIR_HOLD_CYCLES=1, ENABLE_SETUP_CYCLES=1)
+        if configuration == "blocked":
+            params.update(STEP_HIGH_CYCLES=13, STEP_LOW_CYCLES=11)
+    elif configuration == "long_direction_setup":
+        # Exercise shared timers when direction setup exceeds enable setup,
+        # STEP low exceeds direction hold, and high time needs a wider word.
+        params.update(CLOCK_HZ=100000, STEP_HIGH_CYCLES=17, STEP_LOW_CYCLES=9,
+                      DIR_SETUP_CYCLES=12, DIR_HOLD_CYCLES=3, ENABLE_SETUP_CYCLES=4)
+    elif configuration == "wide_fraction":
+        # The fused signed increment must sign-extend beyond the 21-bit input.
+        params.update(CLOCK_HZ=40000000)
+    elif configuration == "small_split":
+        # Reduced threshold 10 = 5*2 exercises the split path with a one-bit
+        # fractional word, maximum increment equal to its modulus, and an
+        # upper modulus different from production's 625.
+        params.update(CLOCK_HZ=10, CONTROL_HZ=65536, MAX_STEP_HZ=2,
+                      STEP_HIGH_CYCLES=1, STEP_LOW_CYCLES=1,
+                      DIR_SETUP_CYCLES=1, DIR_HOLD_CYCLES=1, ENABLE_SETUP_CYCLES=1)
+    elif configuration == "unit_threshold":
+        params.update(CLOCK_HZ=1, CONTROL_HZ=65536, MAX_STEP_HZ=1,
+                      STEP_HIGH_CYCLES=1, STEP_LOW_CYCLES=1,
+                      DIR_SETUP_CYCLES=1, DIR_HOLD_CYCLES=1, ENABLE_SETUP_CYCLES=1)
+    runner = get_runner("icarus")
+    runner.build(sources=[root / "src" / "step_dir_generator.v"],
+                 hdl_toplevel="step_dir_generator", parameters=params,
+                 build_dir=tmp_path / "nco_build", timescale=("1ns", "1ps"), always=True)
+    runner.test(hdl_toplevel="step_dir_generator", test_module="test_step_dir",
+                test_filter="nco_old_algorithm_equivalence",
+                test_dir=Path(__file__).parent, extra_env={"STEP_TEST_PARAMS": json.dumps(params)},
+                results_xml=str(tmp_path / "nco_results.xml"))

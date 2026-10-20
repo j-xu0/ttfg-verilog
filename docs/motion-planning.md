@@ -80,18 +80,24 @@ accelerates without displacement. Exact discrete stopping distance determines
 acceleration, cruise and braking. Final fractional displacement lands exactly on
 the target; the landing edge sets velocity zero and emits one-clock `done`.
 
-`SERIAL_SETUP=1`, selected by the top level, precomputes the speed cap's exact
-stopping distance using restoring division and two shift/add products. Preparation
-lasts 3*LIMIT_WIDTH+1 clocks after acceptance (61 at W20), and the first usable tick
-is the following edge. Busy stays high, velocity is zero, and ticks are ignored
-during preparation. Thereafter stopping distances use exact addition/subtraction
-recurrences. No variable divider or variable multiplier is elaborated in this
-configuration. Reset/disable also cancels preparation.
+The integrated `compact_motion_planner` uses a generated 64-entry lookup table
+for the exact discrete stopping sums of the supported velocity/acceleration
+pairs. Values larger than every legal move are represented by an always-rejected
+sentinel; accepted stopping sums remain exact. Reachability bounds reduce stored
+stopping distance to 29 bits and the shared bit-serial accumulator to 30 bits.
 
-Standalone defaults remain Q8/W16/SERIAL_SETUP=0 for compatibility with the previous
-PR. That configuration retains combinational stopping arithmetic and is not used
-in the chip. Zero distance completes on acceptance. Zero limits return `done` at
-the supplied start coordinate without motion; top-level lookup values are nonzero.
+Each tick starts a calculation completing within 700 system clocks, before the
+next 10,000-clock control tick. Position and velocity are temporary arithmetic
+workspace while `calculating=1` and may only be sampled while idle. The top-level
+PI captures the previously completed reference on the same edge the next planner
+calculation starts. Target/settling decisions also exclude in-flight calculations.
+Planner inputs remain stable while busy because SPI rejects writes. This permits
+`STABLE_CONFIG=1` to omit redundant target/profile registers. Disable/reset
+cancels an unfinished calculation; the next command starts from measured position.
+
+The old `motion_planner.v` remains as a standalone reference with its previous
+Q8/Q16 tests; it is excluded from the physical source list. No speed, acceleration,
+gain, position-range, or Q16 fractional-resolution setting is removed.
 
 ## PI arithmetic
 
@@ -104,6 +110,13 @@ the error would push it farther into saturation. Reduced limits still clamp the
 stored integral. All intermediate sums are signed 32-bit and cannot overflow over
 the defined position range. Gain shifts round negative values toward minus infinity.
 
+The top level selects `SERIAL=1, STABLE_CONFIG=1`. An idle tick snapshots error
+and feedforward. Gains/limit are read live and must remain stable during work;
+the top-level busy/write interlock enforces that condition. Command and saturation
+are published together within 450clocks. Internal integral storage is workspace
+while calculating and must not be sampled until completion. Legacy parallel mode
+remains available for reference tests. Ticks during work are ignored.
+
 A launch, disable, or final reference/feedback match clears PI state independent
 of tick. The gains are discrete gains per 1 kHz sample, not gains per second.
 Planner acceleration bounds the reference; PI correction may change the actual
@@ -112,8 +125,13 @@ must account for this distinction and the real plant dynamics.
 
 ## STEP/DIR/ENABLE timing
 
-`step_dir_generator` accumulates magnitude*CONTROL_HZ against CLOCK_HZ*65536 and
-preserves fractional carry at steady rates. Command magnitude is clamped to 10,000
+`step_dir_generator` divides its phase threshold and increment by their exact
+constant greatest common divisor. At the default clock rates this cancels 1000,
+shrinks phase storage 40→30 bits and removes multiplication by 1000. A split
+fractional/coarse accumulator additionally simplifies the default modulo logic;
+other parameter combinations retain a general carry/borrow fallback. This preserves
+every pulse-generator event cycle for an identical command stream, not merely
+average frequency. Command magnitude is clamped to 10,000
 steps/s. Positive motion uses DIR=1; ENABLE is logical active high. Defaults:
 
 | Requirement | System clocks | At 10 MHz |
@@ -139,9 +157,8 @@ check displacement, acceleration, saturation, exact landing, timing and rate cou
 Port-level motor tests model legal encoder feedback, dropped steps and disturbances.
 This idealized digital model does not establish real motor stability or tuning.
 
-Full-top generic Yosys/ABC synthesis passes with 611 flip-flops and approximately 6,800 generic
-cells. The first GF180 run measured about 145,526 um² of movable cells and
-failed placement in 1x1; the allocation is now provisionally 3x2. Operation at
-10 MHz, completed routing, gate-level behavior, and physical signoff remain
-unverified. See `hardening.md` for the area investigation. The existing GF180 workflow now includes
-all source files; its actual reports must determine physical feasibility.
+Controlled full-top GF180 standard-cell synthesis measures 61,318.522 um²,
+2,480 cells and 392 flip-flops, a 56.5% area reduction from the original controller
+under the same local mapping flow. The mandatory 1x1 core is only 51,966.970 um²,
+so this is still over budget. No 1x1 fit, post-route timing or physical-signoff
+claim follows from these results. See `area-optimization.md`.
