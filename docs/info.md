@@ -113,9 +113,10 @@ and output rates must be established with the GF180 flow and the actual board
 and output loading. RTL tests alone do not prove them.
 
 All functional blocks now feed observable motion/status outputs. Generic Yosys
-synthesis passes, but tile fit, GF180 STA, DRC/LVS, and gate-level simulation are
-still unverified. The full controller exceeded the original 1x1 floorplan;
-the allocation is now provisionally 3x2. See `hardening.md` for measured area.
+synthesis passes, but the mandatory 1x1 allocation is still over budget. Local
+GF180 mapping measures 71,421 um² against a 51,967 um² core. Successful larger-tile
+checks do not establish 1x1 fit. See `area-optimization.md` for the current
+measurements and `hardening.md` for history.
 
 ## How to test
 

@@ -1,6 +1,9 @@
 """PI numeric contract, saturation, anti-windup, and sequential controls."""
 from pathlib import Path
 import random
+import os
+
+import pytest
 
 import cocotb
 from cocotb.triggers import Timer
@@ -50,14 +53,32 @@ async def pi_contract(dut):
              reference_position=0, measured_position=0,
              feedforward_velocity=0, max_velocity=655360, kp_select=0, ki_select=0)
     model = Model()
+    serial = os.environ.get("PI_SERIAL", "0") == "1"
+    stable = os.environ.get("PI_STABLE", "0") == "1"
 
     async def step(**changes):
         p.update(changes)
         for name, value in p.items():
             signal = getattr(dut, name)
             signal.value = value & ((1 << len(signal)) - 1)
+        previous = model.command, model.saturated
         model.update(p)
         await clock(dut)
+        if serial and p["rst_n"] and p["enable"] and not p["clear"] and p["tick"]:
+            assert int(dut.calculating.value) == 1
+            # Captured numeric inputs must be immune to changes during work;
+            # extra ticks while busy are ignored rather than queuing samples.
+            for name in ("reference_position", "measured_position", "feedforward_velocity",
+                         "max_velocity", "kp_select", "ki_select"):
+                if not stable or name not in ("max_velocity", "kp_select", "ki_select"):
+                    getattr(dut, name).value = 0
+            for cycle in range(450):
+                assert (signed(dut.velocity_command), int(dut.saturated.value)) == previous
+                await clock(dut)
+                if not int(dut.calculating.value):
+                    break
+            else:
+                raise AssertionError("serial calculation exceeded latency bound")
         actual = signed(dut.velocity_command), int(dut.saturated.value)
         assert actual == (model.command, model.saturated), (p.copy(), actual, model.__dict__)
         assert signed(dut.integral) == model.integral, (p.copy(), model.__dict__)
@@ -144,6 +165,29 @@ async def pi_contract(dut):
                                             rng.randrange(1 << 20))),
                    kp_select=rng.randrange(4), ki_select=rng.randrange(4))
 
+    if serial:
+        # Both clear and disable cancel partially evaluated samples. No stale
+        # result can reappear after re-enabling without a fresh tick.
+        for abort in ("clear", "enable", "rst_n"):
+            await step(clear=1, tick=0)
+            await step(clear=0, enable=1, rst_n=1, tick=0)
+            dut.tick.value = 1
+            await clock(dut)
+            dut.tick.value = 0
+            for _ in range(53):
+                await clock(dut)
+            assert int(dut.calculating.value)
+            getattr(dut, abort).value = 1 if abort == "clear" else 0
+            await clock(dut)
+            assert not int(dut.calculating.value)
+            assert signed(dut.velocity_command) == signed(dut.integral) == 0
+            dut.clear.value = 0
+            dut.enable.value = 1
+            dut.rst_n.value = 1
+            for _ in range(450):
+                await clock(dut)
+                assert signed(dut.velocity_command) == signed(dut.integral) == 0
+
     # Reset is asynchronous, independent of both clock and tick.
     await step(clear=0, enable=1, tick=1, reference_position=65536,
                measured_position=0, max_velocity=655360, feedforward_velocity=100)
@@ -153,13 +197,15 @@ async def pi_contract(dut):
     assert signed(dut.velocity_command) == signed(dut.integral) == int(dut.saturated.value) == 0
 
 
-def test_pi(tmp_path):
+@pytest.mark.parametrize("serial,stable", [(0, 0), (1, 0), (1, 1)])
+def test_pi(tmp_path, serial, stable):
     from cocotb_tools.runner import get_runner
     root = Path(__file__).resolve().parents[1]
     runner = get_runner("icarus")
     runner.build(sources=[root / "src" / "pi_controller.v"],
                  hdl_toplevel="pi_controller", build_dir=tmp_path / "pi_build",
-                 timescale=("1ns", "1ps"), always=True)
+                 timescale=("1ns", "1ps"), parameters={"SERIAL": serial, "STABLE_CONFIG": stable}, always=True)
     runner.test(hdl_toplevel="pi_controller", test_module="test_pi",
                 test_dir=Path(__file__).parent,
-                results_xml=str(tmp_path / "pi_results.xml"))
+                results_xml=str(tmp_path / "pi_results.xml"),
+                extra_env={"PI_SERIAL": str(serial), "PI_STABLE": str(stable)})

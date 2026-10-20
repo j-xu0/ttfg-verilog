@@ -4,7 +4,7 @@ import os
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import Edge, FallingEdge, ReadOnly, Timer
+from cocotb.triggers import Edge, FallingEdge, ReadOnly, RisingEdge, Timer
 from cocotb.utils import get_sim_time
 
 
@@ -308,3 +308,38 @@ async def full_speed_and_default_limits(dut):
     await wait_settled(dut, timeout_us=300000)
     assert motor.position == 1201
     assert motor.widths and min(motor.widths) >= 5000
+
+
+@cocotb.test(skip=os.environ.get("GATES") == "yes")
+async def serial_reference_sampling(dut):
+    """PI snapshots a completed reference before planner workspace is reused."""
+    await initialize(dut)
+    await spi_frame(dut, 0xC03F)
+    await spi_frame(dut, 0x8004)
+    set_input(dut, 5, 1)
+    top = dut.user_project
+
+    def signed(signal):
+        raw = int(signal.value)
+        return raw - (1 << len(signal)) if raw >> (len(signal)-1) else raw
+
+    for _ in range(5):
+        # The first interval also includes enable synchronization and phase.
+        for _ in range(10020):
+            await FallingEdge(dut.clk)
+            if int(top.control_ce.value):
+                break
+        else:
+            raise AssertionError("control tick missing")
+        assert not int(top.planner_calculating.value)
+        assert not int(top.pi_calculating.value)
+        reference = signed(top.reference_position)
+        feedback = signed(top.position)
+        await RisingEdge(dut.clk)
+        await Timer(1, unit="ns")
+        assert int(top.planner_calculating.value)
+        assert int(top.pi_calculating.value)
+        assert signed(top.controller.serial.error_ring) == reference - feedback*65536
+        await Timer(80, unit="us")
+        assert not int(top.planner_calculating.value)
+        assert not int(top.pi_calculating.value)

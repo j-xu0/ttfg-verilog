@@ -15,7 +15,7 @@ jobs:
 
       - name: Check full-design synthesis
         run: |
-          yosys -p 'read_verilog src/*.v; hierarchy -top tt_um_j_xu0_stepper; proc; opt; check -assert; select -assert-none t:$div t:$mod t:$divfloor t:$modfloor; synth -top tt_um_j_xu0_stepper; check -assert; stat'
+          yosys -p 'read_verilog -I src src/*.v; hierarchy -top tt_um_j_xu0_stepper; proc; opt; check -assert; select -assert-none t:$div t:$mod t:$divfloor t:$modfloor; synth -top tt_um_j_xu0_stepper; check -assert; stat'
 
       # Set Python up and install cocotb
       - name: Setup python
@@ -28,7 +28,7 @@ jobs:
         run: pip install -r test/requirements.txt
 
       - name: Run module unit tests
-        run: python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py test/test_pi.py test/test_step_dir.py -q
+        run: python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py test/test_compact_planner.py test/test_pi.py test/test_step_dir.py -q
 
       - name: Run tests
         run: |
