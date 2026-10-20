@@ -323,6 +323,7 @@ async def serial_reference_sampling(dut):
         raw = int(signal.value)
         return raw - (1 << len(signal)) if raw >> (len(signal)-1) else raw
 
+    integral = 0
     for _ in range(5):
         # The first interval also includes enable synchronization and phase.
         for _ in range(10020):
@@ -335,11 +336,71 @@ async def serial_reference_sampling(dut):
         assert not int(top.pi_calculating.value)
         reference = signed(top.reference_position)
         feedback = signed(top.position)
+        feedforward = signed(top.reference_velocity)
+        error = reference - feedback*65536
+        total = feedforward + error//8 + integral
+        command = max(-655360, min(655360, total))
+        saturated = int(command != total)
+        if not ((total > 655360 and error > 0) or
+                (total < -655360 and error < 0)):
+            integral = max(-655360, min(655360, integral + error//8))
         await RisingEdge(dut.clk)
         await Timer(1, unit="ns")
-        assert int(top.planner_calculating.value)
+        assert not int(top.planner_calculating.value)
         assert int(top.pi_calculating.value)
-        assert signed(top.controller.serial.error_ring) == reference - feedback*65536
-        await Timer(80, unit="us")
+        assert int(top.controller.work.value) & 8191 == feedback & 8191
+        for _ in range(2000):
+            if not int(top.pi_calculating.value):
+                break
+            await RisingEdge(dut.clk)
+            await Timer(1, unit="ns")
+        else:
+            raise AssertionError("PI exceeded shared-engine deadline")
+        assert signed(top.velocity_command) == command
+        assert int(top.pi_saturated.value) == saturated
+        assert int(top.planner_calculating.value)
+        for _ in range(2000):
+            if not int(top.engine_calculating.value):
+                break
+            await RisingEdge(dut.clk)
+            await Timer(1, unit="ns")
+        else:
+            raise AssertionError("planner exceeded shared-engine deadline")
         assert not int(top.planner_calculating.value)
         assert not int(top.pi_calculating.value)
+
+
+@cocotb.test(skip=os.environ.get("GATES") == "yes")
+async def shared_engine_abort_phases(dut):
+    """Raw disable/reset inhibits pins in either engine phase without restart."""
+    await initialize(dut)
+    top = dut.user_project
+    for abort in ("disable", "reset"):
+        for phase in ("pi_calculating", "planner_calculating"):
+            await spi_frame(dut, 0xC03F)
+            await spi_frame(dut, 0x8004)
+            set_input(dut, 5, 1)
+            for _ in range(12000):
+                await FallingEdge(dut.clk)
+                if int(getattr(top, phase).value):
+                    break
+            else:
+                raise AssertionError(f"engine never reached {phase}")
+            if abort == "disable":
+                set_input(dut, 5, 0)
+            else:
+                dut.rst_n.value = 0
+            # Check the physical pins before the next clock can clear state.
+            await Timer(1, unit="ns")
+            assert int(dut.uo_out.value) & 7 == 0
+            await Timer(1000, unit="ns")
+            assert not int(top.engine_calculating.value)
+            assert not int(top.planner_busy.value)
+            assert int(top.velocity_command.value) == 0
+            dut.rst_n.value = 1
+            set_input(dut, 5, 1)
+            # A cancelled move needs a fresh TARGET, even after two ticks.
+            await Timer(2100, unit="us")
+            assert int(dut.uo_out.value) & 0x1F == 0
+            set_input(dut, 5, 0)
+            await Timer(1000, unit="ns")

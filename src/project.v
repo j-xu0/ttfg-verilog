@@ -33,14 +33,13 @@ module tt_um_j_xu0_stepper (
                    && position == target;
   wire launch = run_allowed && command_pending && !active;
   wire control_ce, planner_busy, planner_done, planner_calculating, pi_calculating;
+  wire engine_calculating;
   wire signed [28:0] reference_position;
   wire signed [20:0] reference_velocity, velocity_command;
   // An idle planner for an armed move has completed at the latched TARGET.
   // Workspace outputs are deliberately invalid during serial calculations.
   wire target_reached = active && !planner_busy && !planner_calculating
       && position == target;
-  `include "plan_lut.vh"
-  wire [19:0] velocity_limit = profile_velocity(plan[2:0]);
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -121,25 +120,20 @@ module tt_um_j_xu0_stepper (
   control_timebase timebase (
       .clk(clk), .rst_n(rst_n), .enable(run_allowed), .control_ce(control_ce)
   );
-  compact_motion_planner #(.STABLE_CONFIG(1)) planner (
-      .clk(clk), .rst_n(rst_n), .tick(control_ce), .enable(run_allowed),
-      .start(launch), .start_position(position), .target_position(target),
-      .plan_code(plan),
-      .reference_position(reference_position), .reference_velocity(reference_velocity),
-      .busy(planner_busy), .done(planner_done), .calculating(planner_calculating)
-  );
   wire pi_saturated, rate_limited;
-  // SPI rejects configuration writes throughout active motion, so live gain
-  // and limit inputs stay stable until the serial controller is cleared.
-  pi_controller #(.SERIAL(1), .STABLE_CONFIG(1)) controller (
-      .clk(clk), .rst_n(rst_n), .enable(run_allowed && active),
-      .clear(launch || target_reached),
-      .tick(control_ce && !planner_calculating && !pi_calculating),
-      .reference_position(reference_position), .measured_position(position),
-      .feedforward_velocity(reference_velocity), .max_velocity(velocity_limit),
-      .kp_select(control[3:2]), .ki_select(control[1:0]),
+  // One engine samples the completed reference and feedback, evaluates PI,
+  // then advances the planner using the same scratch register and bit ALU.
+  // Busy SPI writes are rejected, keeping configuration stable during work.
+  shared_motion_controller #(.STABLE_CONFIG(1)) controller (
+      .clk(clk), .rst_n(rst_n), .tick(control_ce), .enable(run_allowed),
+      .control_enable(active), .clear_control(launch || target_reached),
+      .start(launch), .start_position(position), .target_position(target),
+      .plan_code(plan), .kp_select(control[3:2]), .ki_select(control[1:0]),
+      .reference_position(reference_position), .reference_velocity(reference_velocity),
+      .planner_busy(planner_busy), .planner_done(planner_done),
+      .planner_calculating(planner_calculating), .pi_calculating(pi_calculating),
       .velocity_command(velocity_command), .saturated(pi_saturated),
-      .calculating(pi_calculating)
+      .calculating(engine_calculating)
   );
   wire step, dir, driver_enable;
   step_dir_generator pulses (
@@ -153,6 +147,6 @@ module tt_um_j_xu0_stepper (
   assign uio_out = 8'h00;
   assign uio_oe = 8'h00;
   wire _unused = &{ui_in[7:6], uio_in, write_pulse, reject_pulse, planner_done,
-                   pi_saturated, rate_limited, 1'b0};
+                   pi_saturated, rate_limited, pi_calculating, engine_calculating, 1'b0};
 endmodule
 `default_nettype wire
