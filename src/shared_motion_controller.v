@@ -18,11 +18,11 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
     input wire signed [12:0] start_position, target_position,
     input wire [5:0] plan_code,
     input wire [1:0] kp_select, ki_select,
-    output reg signed [28:0] reference_position,
-    output wire signed [20:0] reference_velocity,
+    output reg signed [20:0] reference_position,
+    output wire signed [12:0] reference_velocity,
     output reg planner_busy, planner_done,
     output wire planner_calculating, pi_calculating, calculating,
-    output reg signed [20:0] velocity_command,
+    output reg signed [12:0] velocity_command,
     output reg saturated
 );
 `include "plan_lut.vh"
@@ -40,7 +40,7 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
     (* fsm_encoding = "none" *) reg [5:0] state;
     reg working;
     reg [4:0] bit_index;
-    reg [29:0] accumulator;
+    reg [21:0] accumulator;
     reg [3:0] operand_a, operand;
     reg [1:0] carry;
     reg subtract;
@@ -49,8 +49,8 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
     wire [5:0] profile = STABLE_CONFIG != 0 ? plan_code : latched_profile;
     wire signed [12:0] goal = STABLE_CONFIG != 0 ? target_position : latched_goal;
     reg negative, source_position_sign;
-    reg [19:0] speed;
-    reg [28:0] stopping;
+    reg [11:0] speed;
+    reg [20:0] stopping;
     reg capped, finishing;
     always @* begin
         operand_a = ZERO; operand = ZERO; subtract = 0;
@@ -82,23 +82,23 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
             VELOCITY: begin operand=SPEED; subtract=negative; end
         endcase
     end
-    wire [19:0] vmax = profile_velocity(profile[2:0]);
-    wire [12:0] accel = profile_acceleration(profile[5:3]);
-    wire [28:0] max_stop = profile_stopping(profile);
-    wire [29:0] goal_extended = {goal[12],goal,16'b0};
+    wire [11:0] vmax = profile_velocity(profile[2:0]);
+    wire [4:0] accel = profile_acceleration(profile[5:3]);
+    wire [20:0] max_stop = profile_stopping(profile);
+    wire [21:0] goal_extended = {goal[12],goal,8'b0};
     wire [9:0] source_bits = {
         accumulator[0],
-        bit_index < 29 ? max_stop[bit_index] : 1'b0,
-        bit_index < 29 ? stopping[0] : 1'b0,
-        bit_index < 20 ? vmax[bit_index] : 1'b0,
+        bit_index < 21 ? max_stop[bit_index] : 1'b0,
+        bit_index < 21 ? stopping[0] : 1'b0,
+        bit_index < 12 ? vmax[bit_index] : 1'b0,
         goal_extended[bit_index],
-        bit_index < 29 ? reference_position[0] : 1'b0,
-        bit_index < 29 ? reference_position[0] : source_position_sign,
-        bit_index < 13 ? accel[bit_index] : 1'b0,
-        bit_index < 20 ? speed[0] : 1'b0,
+        bit_index < 21 ? reference_position[0] : 1'b0,
+        bit_index < 21 ? reference_position[0] : source_position_sign,
+        bit_index < 5 ? accel[bit_index] : 1'b0,
+        bit_index < 12 ? speed[0] : 1'b0,
         1'b0};
 
-    assign reference_velocity = $signed(accumulator[20:0]);
+    assign reference_velocity = $signed(accumulator[12:0]);
     assign calculating = state != IDLE || working;
     assign planner_calculating = state >= P_IDLE || working;
     assign pi_calculating = state > IDLE && state < P_IDLE;
@@ -119,14 +119,14 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
         input sub;
         input [5:0] next_state;
         begin
-            source_position_sign <= reference_position[28]; carry <= {1'b0,sub};
+            source_position_sign <= reference_position[20]; carry <= {1'b0,sub};
             bit_index <= 0; state <= next_state; working <= 1;
         end
     endtask
 
 
-    reg signed [20:0] integral;
-    reg [20:0] work;
+    reg signed [12:0] integral;
+    reg [12:0] work;
     reg [1:0] saved_kp, saved_ki;
     reg error_negative, integral_negative, pi_cancelled;
     reg integral_phase, overflow, low_sign, pi_negative, clipped;
@@ -137,16 +137,16 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
     wire error_tap = gain == 0 ? accumulator[3] :
                      gain == 1 ? accumulator[2] :
                      gain == 2 ? accumulator[1] : accumulator[0];
-    wire [4:0] last_error_bit = gain == 0 ? 26 : gain == 1 ? 27 : gain == 2 ? 28 : 29;
+    wire [4:0] last_error_bit = gain == 0 ? 18 : gain == 1 ? 19 : gain == 2 ? 20 : 21;
     wire error_bit = bit_index <= last_error_bit ? error_tap : error_negative;
-    wire integral_bit = bit_index < 21 ? integral[0] : integral_negative;
+    wire integral_bit = bit_index < 13 ? integral[0] : integral_negative;
     wire ff_bit = !integral_phase &&
-        ((bit_index < 20 ? speed[0] : 1'b0) ^ negative);
-    wire measured_bit = bit_index < 16 ? 1'b0 :
-        bit_index < 29 ? work[0] : work[12];
-    wire position_bit = bit_index < 29 ? reference_position[0] : source_position_sign;
-    wire [20:0] value = integral_phase ? integral : work;
-    wire limit_bit = bit_index == 20 ? 1'b0 : vmax[bit_index];
+        ((bit_index < 12 ? speed[0] : 1'b0) ^ negative);
+    wire measured_bit = bit_index < 8 ? 1'b0 :
+        bit_index < 21 ? work[0] : work[12];
+    wire position_bit = bit_index < 21 ? reference_position[0] : source_position_sign;
+    wire [12:0] value = integral_phase ? integral : work;
+    wire limit_bit = bit_index == 12 ? 1'b0 : vmax[bit_index];
     wire magnitude_bit = pi_negative ? (~value[0] ^ carry[1]) : value[0];
     wire limit_signed_bit = pi_negative ? (~limit_bit ^ carry[0]) : limit_bit;
     wire windup = clipped && pi_negative == error_negative;
@@ -181,47 +181,47 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
         // returning control to the planner. Global abort can stop immediately
         // because the next start reinitializes those operands.
         if (state == PI_READY) begin
-            error_negative <= accumulator[29];
+            error_negative <= accumulator[21];
             carry <= {1'b0,negative}; bit_index <= 0;
         end
         if (state == PI_ERROR) begin
-            accumulator <= {alu_sum[0],accumulator[29:1]};
-            if (bit_index < 29)
-                reference_position <= {reference_position[0],reference_position[28:1]};
-            if (bit_index >= 16 && bit_index < 29)
+            accumulator <= {alu_sum[0],accumulator[21:1]};
+            if (bit_index < 21)
+                reference_position <= {reference_position[0],reference_position[20:1]};
+            if (bit_index >= 8 && bit_index < 21)
                 work[12:0] <= {work[0],work[12:1]};
             carry <= {1'b0,alu_sum[1]}; bit_index <= bit_index + 1'b1;
         end
         if (state == PI_SUM) begin
-            if (bit_index < 30) accumulator <= {accumulator[0],accumulator[29:1]};
-            if (!integral_phase && bit_index < 20) speed <= {speed[0],speed[19:1]};
-            if (bit_index < 21 && !integral_phase) work <= {alu_sum[0],work[20:1]};
-            if (bit_index == 20) low_sign <= alu_sum[0];
-            if (bit_index > 20 && alu_sum[0] != low_sign) overflow <= 1;
+            if (bit_index < 22) accumulator <= {accumulator[0],accumulator[21:1]};
+            if (!integral_phase && bit_index < 12) speed <= {speed[0],speed[11:1]};
+            if (bit_index < 13 && !integral_phase) work <= {alu_sum[0],work[12:1]};
+            if (bit_index == 12) low_sign <= alu_sum[0];
+            if (bit_index > 12 && alu_sum[0] != low_sign) overflow <= 1;
             carry <= alu_sum[2:1]; bit_index <= bit_index + 1'b1;
-            if (bit_index == 30) pi_negative <= alu_sum[0];
+            if (bit_index == 22) pi_negative <= alu_sum[0];
         end
         if (state == PI_CLAMP) clipped <= overflow;
         if (state == PI_COMPARE_START) begin
             comparison_nonzero <= 0; bit_index <= 0; carry <= 3;
         end
         if (state == PI_COMPARE) begin
-            if (!integral_phase) work <= {work[0],work[20:1]};
+            if (!integral_phase) work <= {work[0],work[12:1]};
             carry <= {pi_negative && (~value[0] & carry[1]),alu_sum[1]};
             comparison_nonzero <= comparison_nonzero | alu_sum[0];
             bit_index <= bit_index + 1'b1;
-            if (bit_index == 20) clipped <= compare_clipped;
+            if (bit_index == 12) clipped <= compare_clipped;
         end
         if (state == PI_FILL_START) begin carry <= 1; bit_index <= 0; end
         if (state == PI_FILL) begin
-            if (!integral_phase) work <= {limit_signed_bit,work[20:1]};
+            if (!integral_phase) work <= {limit_signed_bit,work[12:1]};
             carry <= {1'b0,(~limit_bit & carry[0])};
             bit_index <= bit_index + 1'b1;
         end
         if (state == PI_CLAMP_DONE && !integral_phase) begin
             pending_saturated <= clipped; integral_phase <= 1;
-            integral_negative <= integral[20]; overflow <= 0;
-            if (windup) pi_negative <= integral[20];
+            integral_negative <= integral[12]; overflow <= 0;
+            if (windup) pi_negative <= integral[12];
             else begin carry <= 0; bit_index <= 0; end
         end
         if (!rst_n) begin
@@ -238,7 +238,7 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
                 state <= IDLE; working <= 0; accumulator <= 0;
                 integral <= 0; velocity_command <= 0; saturated <= 0;
             end else if (start && !planner_busy && state == IDLE) begin
-                reference_position <= {start_position,16'b0};
+                reference_position <= {start_position,8'b0};
                 latched_goal <= target_position; negative <= target_position < start_position;
                 latched_profile <= plan_code; speed <= 0; stopping <= 0;
                 accumulator <= 0; working <= 0; pi_cancelled <= 0;
@@ -249,12 +249,12 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
                 if (clear_control || !control_enable || pi_cancelled) begin
                     integral <= 0; velocity_command <= 0; saturated <= 0;
                 end else begin
-                    if (state == PI_SUM && bit_index < 21)
-                        integral <= {integral_phase ? alu_sum[0] : integral[0],integral[20:1]};
+                    if (state == PI_SUM && bit_index < 13)
+                        integral <= {integral_phase ? alu_sum[0] : integral[0],integral[12:1]};
                     else if (state == PI_COMPARE && integral_phase)
-                        integral <= {integral[0],integral[20:1]};
+                        integral <= {integral[0],integral[12:1]};
                     else if (state == PI_FILL && integral_phase)
-                        integral <= {limit_signed_bit,integral[20:1]};
+                        integral <= {limit_signed_bit,integral[12:1]};
                     if (state == PI_PUBLISH) begin
                         velocity_command <= work; saturated <= pending_saturated;
                     end
@@ -263,42 +263,42 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
                     state != PI_ERROR && state != PI_SUM) begin
                     begin_planner();
                 end else if (working) begin
-                    if ((operand_a == SPEED || operand == SPEED || write_speed) && bit_index < 20)
+                    if ((operand_a == SPEED || operand == SPEED || write_speed) && bit_index < 12)
                         speed <= {write_speed ? alu_sum[0] : speed[0],speed[19:1]};
                     if ((operand_a == POSITION_SIGNED || operand_a == DISTANCE ||
-                         operand == POSITION_SIGNED || operand == DISTANCE || write_position) && bit_index < 29)
-                        reference_position <= {write_position ? alu_sum[0] : reference_position[0],reference_position[28:1]};
-                    if ((operand_a == STOPPING || operand == STOPPING || write_stopping) && bit_index < 29)
+                         operand == POSITION_SIGNED || operand == DISTANCE || write_position) && bit_index < 21)
+                        reference_position <= {write_position ? alu_sum[0] : reference_position[0],reference_position[20:1]};
+                    if ((operand_a == STOPPING || operand == STOPPING || write_stopping) && bit_index < 21)
                         stopping <= {write_stopping ? alu_sum[0] : stopping[0],stopping[28:1]};
-                    accumulator <= {alu_sum[0],accumulator[29:1]};
+                    accumulator <= {alu_sum[0],accumulator[21:1]};
                     carry <= {1'b0,alu_sum[1]}; bit_index <= bit_index + 1'b1;
-                    if (bit_index == 29) working <= 0;
+                    if (bit_index == 21) working <= 0;
                 end else case (state)
                     IDLE: if (tick) begin
                         if (control_enable && !clear_control) begin
                             work[12:0] <= start_position;
-                            source_position_sign <= reference_position[28];
+                            source_position_sign <= reference_position[20];
                             saved_kp <= kp_select; saved_ki <= ki_select;
-                            integral_negative <= integral[20]; pi_cancelled <= 0;
+                            integral_negative <= integral[12]; pi_cancelled <= 0;
                             integral_phase <= 0; carry <= 1; bit_index <= 0; overflow <= 0;
                             state <= PI_ERROR;
                         end else begin_planner();
                     end
-                    PI_ERROR: if (bit_index == 29) begin
+                    PI_ERROR: if (bit_index == 21) begin
                         if (clear_control || !control_enable || pi_cancelled) begin_planner();
                         else state <= PI_READY;
                     end
                     PI_READY: state <= PI_SUM;
-                    PI_SUM: if (bit_index == 30) begin
+                    PI_SUM: if (bit_index == 22) begin
                         if (clear_control || !control_enable || pi_cancelled) begin_planner();
                         else state <= PI_SUM_DONE;
                     end
                     PI_SUM_DONE: state <= PI_CLAMP;
                     PI_CLAMP: state <= overflow ? PI_FILL_START : PI_COMPARE_START;
                     PI_COMPARE_START: state <= PI_COMPARE;
-                    PI_COMPARE: if (bit_index == 20) state <= compare_clipped ? PI_FILL_START : PI_CLAMP_DONE;
+                    PI_COMPARE: if (bit_index == 12) state <= compare_clipped ? PI_FILL_START : PI_CLAMP_DONE;
                     PI_FILL_START: state <= PI_FILL;
-                    PI_FILL: if (bit_index == 20) state <= PI_CLAMP_DONE;
+                    PI_FILL: if (bit_index == 12) state <= PI_CLAMP_DONE;
                     PI_CLAMP_DONE: if (!integral_phase) state <= windup ? PI_CLAMP : PI_SUM;
                                    else state <= PI_PUBLISH;
                     PI_PUBLISH: begin_planner();

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 `default_nettype none
-// Single-clock DDS pulse generator. velocity_command is signed Q16 steps per
+// Single-clock DDS pulse generator. velocity_command is signed Q8 steps per
 // control tick. driver_enable is logical active high (invert externally if needed).
 // Timing parameters are a conservative configurable interface contract, not a
 // claim of compatibility with an unspecified external motor driver.
@@ -26,7 +26,7 @@ module step_dir_generator #(
     input wire rst_n,
     input wire enable,
     input wire fault,
-    input wire signed [20:0] velocity_command,
+    input wire signed [12:0] velocity_command,
     output wire step,
     output reg dir,
     output wire driver_enable,
@@ -41,7 +41,7 @@ module step_dir_generator #(
             $fatal(1, "STEP generator requires positive parameters and MAX_STEP_HZ <= CLOCK_HZ");
     end
 `endif
-    // Every old phase state is a multiple of gcd(65536*CLOCK_HZ,
+    // Every old phase state is a multiple of gcd(256*CLOCK_HZ,
     // CONTROL_HZ). Divide the threshold and increment by that exact factor;
     // this preserves every carry/event cycle while shrinking the accumulator.
     // The Euclidean loop runs only during elaboration, never in hardware.
@@ -72,11 +72,11 @@ module step_dir_generator #(
             end
         end
     endfunction
-    localparam [63:0] RAW_PHASE_LIMIT = 64'd65536 * CLOCK_HZ;
+    localparam [63:0] RAW_PHASE_LIMIT = 64'd256 * CLOCK_HZ;
     localparam [63:0] PHASE_GCD = constant_gcd(RAW_PHASE_LIMIT, CONTROL_HZ);
     localparam [63:0] PHASE_LIMIT = RAW_PHASE_LIMIT / PHASE_GCD;
     localparam [63:0] INCREMENT_SCALE = CONTROL_HZ / PHASE_GCD;
-    localparam [63:0] MAX_COMMAND = (64'd65536 * MAX_STEP_HZ) / CONTROL_HZ;
+    localparam [63:0] MAX_COMMAND = (64'd256 * MAX_STEP_HZ) / CONTROL_HZ;
     localparam integer PHASE_BITS = PHASE_LIMIT > 1 ? $clog2(PHASE_LIMIT) : 1;
     localparam integer LOW_MAX = (STEP_LOW_CYCLES > DIR_HOLD_CYCLES ?
                                   STEP_LOW_CYCLES : DIR_HOLD_CYCLES) - 1;
@@ -87,12 +87,12 @@ module step_dir_generator #(
     localparam integer ENABLE_MAX = ENABLE_SETUP_CYCLES-1;
     localparam integer SETUP_MAX = DIR_MAX > ENABLE_MAX ? DIR_MAX : ENABLE_MAX;
     localparam integer SETUP_BITS = SETUP_MAX > 0 ? $clog2(SETUP_MAX+1) : 1;
-    wire command_limited = velocity_command[20] ?
+    wire command_limited = velocity_command[12] ?
         $signed(velocity_command) < -$signed(MAX_COMMAND) :
         $signed(velocity_command) > $signed(MAX_COMMAND);
-    wire [20:0] magnitude = velocity_command[20] ?
-        (~velocity_command + 21'd1) : velocity_command;
-    wire [20:0] bounded_magnitude = magnitude > MAX_COMMAND ? MAX_COMMAND : magnitude;
+    wire [12:0] magnitude = velocity_command[12] ?
+        (~velocity_command + 13'd1) : velocity_command;
+    wire [12:0] bounded_magnitude = magnitude > MAX_COMMAND ? MAX_COMMAND : magnitude;
     wire [PHASE_BITS:0] increment = bounded_magnitude * INCREMENT_SCALE;
     wire active = rst_n && enable && !fault;
     reg pulse;
@@ -106,8 +106,8 @@ module step_dir_generator #(
     reg timing_limited;
     localparam integer FRACTION_BITS = trailing_zero_bits(PHASE_LIMIT);
     localparam [63:0] HIGH_LIMIT = PHASE_LIMIT >> FRACTION_BITS;
-    localparam [63:0] MAX_MAGNITUDE = MAX_COMMAND < 64'd1048576 ?
-                                       MAX_COMMAND : 64'd1048576;
+    localparam [63:0] MAX_MAGNITUDE = MAX_COMMAND < 64'd4096 ?
+                                       MAX_COMMAND : 64'd4096;
     localparam [63:0] MAX_INCREMENT = MAX_MAGNITUDE * INCREMENT_SCALE;
     wire [PHASE_BITS-1:0] phase_next;
     wire phase_event;
@@ -121,14 +121,14 @@ module step_dir_generator #(
         // Fold the absolute-value +1 into the accumulator carry input. The
         // direct signed range check avoids a separate magnitude comparator.
         // Other scale/modulus cases retain the general exact increment.
-        wire [FRACTION_BITS-1:0] signed_command = $signed(velocity_command);
+        wire [FRACTION_BITS-1:0] signed_command = $signed(velocity_command[12:0]);
         wire [FRACTION_BITS-1:0] addend = command_limited ?
             MAX_COMMAND : signed_command ^
-                                  {FRACTION_BITS{velocity_command[20]}};
+                                  {FRACTION_BITS{velocity_command[12]}};
         wire [FRACTION_BITS:0] fractional_sum = INCREMENT_SCALE == 1 &&
             MAX_INCREMENT < (64'd1 << FRACTION_BITS) ?
             {1'b0, phase[FRACTION_BITS-1:0]} + {1'b0, addend} +
-                (velocity_command[20] && !command_limited) :
+                (velocity_command[12] && !command_limited) :
             {1'b0, phase[FRACTION_BITS-1:0]} + increment;
         wire [HIGH_BITS-1:0] high = phase[PHASE_BITS-1:FRACTION_BITS];
         wire [HIGH_BITS-1:0] advanced_high = high + fractional_sum[FRACTION_BITS];
@@ -186,11 +186,11 @@ module step_dir_generator #(
 
             if (velocity_command == 0) begin
                 phase <= 0;
-            end else if (dir != !velocity_command[20]) begin
+            end else if (dir != !velocity_command[12]) begin
                 // Finish the current pulse and hold direction beyond its fall.
                 phase <= 0;
                 if (!pulse && (DIR_HOLD_CYCLES <= 1 || pulse_left <= LOW_MAX-(DIR_HOLD_CYCLES-1))) begin
-                    dir <= !velocity_command[20];
+                    dir <= !velocity_command[12];
                     if (setup_left <= DIR_MAX+1) setup_left <= DIR_MAX;
                 end
             end else if (setup_left != 0) begin
