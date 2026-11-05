@@ -15,7 +15,7 @@ Each suite contains many directed cases:
 
 - Timebase and planner: standalone motion-building-block tests described in
   [the motion-planning contract](../docs/motion-planning.md), including Q8/Q16
-  equivalence and serial command preparation. The standalone compact planner
+  equivalence and mirror-rule trapezoid/triangle coverage. The standalone compact planner
   separately checks all 64 profiles, sentinel bounds, stable-config mode, transient
   workspace sampling, mid-calculation aborts, and generated ROM reproducibility.
 - Shared controller: both captured/stable configurations, all profiles and gain

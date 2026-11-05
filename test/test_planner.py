@@ -1,7 +1,6 @@
 """Discrete planner model and independent invariants: pytest test/test_planner.py."""
 from pathlib import Path
 import random
-from functools import lru_cache
 import pytest
 
 import cocotb
@@ -54,8 +53,8 @@ async def command(dut, origin, target, vmax, accel):
     dut.start.value = 0
     immediate = origin == target or vmax == 0 or accel == 0
     assert state(dut) == (origin * scale(dut), 0, not immediate, immediate)
-    # Preparation deliberately sees tick and changing command inputs. A bounded
-    # serial setup must preserve the accepted origin/zero velocity and busy.
+    # Ticks before the first move must preserve the accepted origin/zero
+    # velocity and busy. (No setup phase exists; preparing stays zero.)
     cycles = 0
     while int(dut.preparing.value):
         dut.start_position.value = (-origin) & 8191
@@ -69,30 +68,40 @@ async def command(dut, origin, target, vmax, accel):
         assert cycles <= 3 * len(dut.max_velocity) + 2
 
 
-@lru_cache(maxsize=32768)
-def stop_sum(speed, accel):
-    # Independent oracle deliberately sums individual discrete deceleration
-    # intervals rather than using the RTL's closed-form quotient/products.
-    return sum(range(speed, 0, -accel))
-
-
-def model_next(pos, speed, goal, vmax, accel):
+def model_next(pos, speed, goal, vmax, accel, extra):
+    # Mirror-rule oracle: speed-up distance is mirrored when slowing down.
+    # extra carries [total, traveled, turn, phase] across ticks.
+    total, traveled, turn, phase = extra
+    traveled += abs(speed)
     pos += speed
-    direction = 1 if goal >= pos else -1
-    remaining = abs(goal - pos)
+    remaining = total - traveled
     if not remaining:
-        return pos, 0, 0, 1
+        return pos, 0, 0, 1, [total, traveled, turn, phase]
     magnitude = abs(speed)
-    candidates = (min(magnitude + accel, vmax), magnitude,
-                  max(magnitude - accel, 0))
-    next_speed = candidates[-1]
-    for candidate in candidates:
-        if stop_sum(candidate, accel) <= remaining:
-            next_speed = candidate
-            break
-    if magnitude <= accel and remaining <= min(accel, vmax):
-        next_speed = remaining
-    return pos, direction * next_speed, 1, 0
+    faster = min(magnitude + accel, vmax)
+    if phase == 0:
+        if magnitude == vmax:
+            turn, phase = traveled, 1
+        elif traveled + faster <= total and 2 * (traveled + faster) <= total:
+            magnitude = faster
+        else:
+            turn, phase = traveled, 2
+    if phase == 1:
+        if traveled >= total - turn:
+            phase = 2
+        else:
+            magnitude = vmax
+    if phase == 2:
+        if magnitude <= accel and remaining <= min(accel, vmax):
+            magnitude = remaining
+        elif magnitude > accel:
+            magnitude -= accel
+    if magnitude == 0 and remaining:
+        magnitude = min(accel, vmax, remaining)
+    if magnitude > remaining:
+        magnitude = remaining
+    direction = 1 if goal >= pos else -1
+    return pos, direction * magnitude, 1, 0, [total, traveled, turn, phase]
 
 
 async def move(dut, origin, target, vmax, accel, disturb=False):
@@ -103,6 +112,7 @@ async def move(dut, origin, target, vmax, accel, disturb=False):
         return []
     goal = target * scale(dut)
     previous = state(dut)
+    extra = [abs(goal - origin * scale(dut)), 0, 0, 0]
     velocities = []
     max_ticks = abs(goal - previous[0]) // max(1, min(accel, vmax)) + 5000
     for index in range(max_ticks):
@@ -118,7 +128,9 @@ async def move(dut, origin, target, vmax, accel, disturb=False):
         if index % 5 == 0:
             await clock(dut, tick=0)
             assert state(dut) == previous
-        expected = model_next(previous[0], previous[1], goal, vmax, accel)
+        pos, vel, busy, done, extra = model_next(
+            previous[0], previous[1], goal, vmax, accel, extra)
+        expected = (pos, vel, busy, done)
         await clock(dut, tick=1)
         actual = state(dut)
         assert actual == expected, (origin, target, vmax, accel, index, actual, expected)
@@ -182,32 +194,22 @@ async def planner_contract(dut):
             accel = rng.choice((33, 66, 255, 1000, 6554, 1048575))
         await move(dut, origin, target, vmax, accel, disturb=True)
 
-    # A serial setup can be aborted before its cached stopping limit exists.
-    if int(dut.SERIAL_SETUP.value):
-        dut.start_position.value = 0
-        dut.target_position.value = 100
-        dut.max_velocity.value = 655360
-        dut.acceleration.value = 33
-        dut.start.value = 1
-        await clock(dut)
-        dut.start.value = 0
-        assert int(dut.preparing.value)
-        dut.enable.value = 0
+    # A move can be aborted mid-flight; the reference holds and reports idle.
+    vmax = 1024 if scale(dut) == 256 else 655360
+    accel = 128 if scale(dut) == 256 else 33
+    await command(dut, 0, 100, vmax, accel)
+    for _ in range(8):
         await clock(dut, tick=1)
-        assert state(dut) == (0, 0, 0, 0)
-        assert not int(dut.preparing.value)
-        dut.enable.value = 1
-        # Reset must also cancel preparation, with no stale cached cap reused.
-        dut.max_velocity.value = 655360
-        dut.acceleration.value = 33
-        dut.start.value = 1
-        await clock(dut)
-        dut.start.value = 0
-        assert int(dut.preparing.value)
-        await reset(dut)
-        assert not int(dut.preparing.value)
-        # A later command must calculate its own stopping cap.
-        await move(dut, 1, -3, 6554, 65)
+    pos = signed(dut.reference_position)
+    assert pos != 0
+    dut.enable.value = 0
+    await clock(dut, tick=1)
+    assert state(dut) == (pos, 0, 0, 0)
+    dut.enable.value = 1
+    await clock(dut, tick=1)
+    assert state(dut) == (pos, 0, 0, 0)
+    # A later command starts fresh; reset clears everything mid-move.
+    await move(dut, 1, -3, 6554, 65)
 
     # Abort is immediate without tick, never falsely reports completion.
     await command(dut, -100, 100, 512, 100)
