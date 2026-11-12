@@ -1,122 +1,173 @@
-# Q13 handoff: P-only split, corrected planner area, and the 1x1 result
+# Q13 handoff: P-only split, measured area ledger, and the 1x1 decision
 
 Date: 2026-11-12. Branch `tmp/q8-area-test`. Supersedes the PI-area conclusion
-in [`q12-handoff.md`](q12-handoff.md) §7; read that note for the exact-Q11 brake
+in [`q12-handoff.md`](q12-handoff.md) §7. Read Q12 for the exact-Q11 brake
 algorithm and the Q12 test map.
 
-## 1. Result
+## 1. Executive summary
 
-The integrator and anti-windup path are gone, and the proportional controller
-is a separate single-cycle module. The serial planner no longer contains any PI
-state.
+The integrator, Ki field and anti-windup path are gone. The proportional
+controller is a separate single-cycle module and the serial planner contains no
+PI state.
 
-**Local** (stock GF180 lib, the eight files now in `PROJECT_SOURCES`):
-**42,718.6 µm²** (sequential 18,402.4, 1,691 cells).
-Baseline on the same flow was 47,613.9 (21,161.7 sequential, 1,833 cells), so
-this is **−4,895.3 µm² (−10.3 %)**.
+**Spec-preserving local area: 42,718.6 µm²** (sequential 18,402.4, 1,691
+cells), down from **47,613.9** (21,161.7 sequential, 1,833 cells) —
+**−4,895.3 µm² (−10.3 %)**.
 
-| block (standalone, `STABLE_CONFIG=1`) | area |
-|---|---:|
-| `motion_engine` (serial planner only) | 18,128.0 (seq 6,939.0, 797 cells) |
-| `pi_p_controller` (dedicated narrow P) | ~7,479 (seq 954.9, 385 cells) |
-| `shared_motion_controller` wrapper, flattened top contribution | remainder |
-| `step_dir_generator` | 6,831.5 |
-| `stepper_spi` | 6,767.8 |
-| `quadrature_decoder` | 2,794.5 |
-| `control_timebase` | 1,870.3 |
-
-CI run 43310580360 on commit `5420187` reports:
+CI run `43310580360` (commit `5420187`):
 
 ```
-Core area:                        51966.970 um^2
-Movable instances area:           43309.101 um^2
-Pin density area adjust:           5867.302 um^2
-Movable instances area (GPL-0018): 49176.403 um^2
-Utilization (GPL-0018):                97.497 %   under 100 %
+Movable instances area:        43309.101 um^2
+Pin density area adjust:        5867.302 um^2
+Movable instances area:        49176.403 um^2  (GPL-0018)
+Utilization:                      97.497 %    (GPL-0018, under 100 %)
 ```
 
-The GPL limit is clear, but **detailed placement still fails** with
-`DPL-0036` on 42 repair-design instances in `RepairDesignPostGPL`. Changing
-`PL_TARGET_DENSITY_PCT` from 60 to 80 and then 40 did not change the movable
-area (43,309.101 um² every time) or the failure, so this is a real density
-problem, not a placement-target setting. The 90 % headroom target exists for
-exactly this reason.
+GPL passes, but **detailed placement fails** with `DPL-0036` on 42
+repair-design instances. This is a real density problem: changing
+`PL_TARGET_DENSITY_PCT` 60 → 80 → 40 changed nothing (movable area stayed
+43,309.101 µm² and DPL failed identically).
 
-## 2. The Q12 planner number was not synthesizable
+The main conclusion for the next agent: **P-only is not enough by itself.**
+The remaining P stage is already close to its feature-preserving floor, and the
+cheap feature/numeric cuts below are what actually move the area. The Q12
+"planner-only 12.9 k" number was not synthesizable, so the old PI marginal was
+overstated by ~5 k.
 
-`q12-handoff.md` reports "planner only (PI structurally deleted) 12,934.1
-(seq 5,220.2, 552 cells)" and derives a 15,981 µm² PI marginal from it. That
-ablation put reset assignments on the combinational `operand`/`operand_a`
-signals. Yosys responded by constant-folding both operand muxes to zero (the
-netlist has `operand = 4'b0000`), which is why the cell count is suspiciously
-small and cannot work on silicon.
+## 2. Current local area ledger (STABLE_CONFIG=1)
 
-Measured correctly (no reset on the combinational operand mux), the planner is
-**18,128.0 STABLE=1**, so the old PI's true marginal was about **10.7 k**, not
-16 k. That is the main correction for future area planning: do not trust a
-planner-only or PI-only delta unless the operand mux survives synthesis untouched.
+| piece | area | cells / seq |
+|---|---:|---|
+| `motion_engine` (planner only) | **16,723.0** | 715 / 6,748.0 |
+| `pi_p_controller` (P only) | **7,404.4** | 374 / 954.9 |
+| open-loop top (P stage deleted) | 36,282.3 | 1,381 / 17,361.8 |
+| **full top** | **42,718.6** | 1,691 / 18,402.4 |
+| `step_dir_generator` | ~6,831.5 | — |
+| `stepper_spi` | ~6,767.8 | — |
+| `quadrature_decoder` | ~2,794.5 | — |
+| `control_timebase` | ~1,870.3 | — |
+
+The P stage's marginal cost at the top is therefore about **6.4 k**, not the
+~16 k the Q12 note implied for the old PI.
 
 ## 3. What changed in the RTL
 
 * `src/motion_engine.v` is the planner-only serial engine. It keeps the exact
-  Q11 brake sum, serial position advance and 1-bit shared ALU.
+  Q11 brake sum, serial position advance and the 1-bit shared ALU.
 * `src/pi_p_controller.v` is a dedicated P stage. Error is integer counts, the
   P term is `error << (8 + Kp)`, and the sum with feedforward is clamped to the
-  profile `vmax`. Any `|error| > 64 >> Kp` is pre-clamped because its Q11 P term
-  exceeds 16,384 and therefore saturates for every legal feedforward/limit, so
-  the whole datapath fits in 16 bits.
-* `src/shared_motion_controller.v` is now a thin wrapper: on a tick it lets the
-  P stage register one command from the pre-advance reference, then advances the
-  serial planner. A registered one-cycle `pi_calculating` strobe replaces the old
-  multi-cycle PI pass window. Clear/disable zero the command without losing the
-  pending planner advance; `enable=0`/reset abort both.
+  profile `vmax`. Any `|error| > 64 >> Kp` is pre-clamped because its Q11 P
+  term exceeds 16,384 and therefore saturates for every legal
+  feedforward/limit, so the whole datapath fits in 16 bits.
+* `src/shared_motion_controller.v` is a thin wrapper: on a tick it lets the P
+  stage register one command from the pre-advance reference, then advances the
+  serial planner. A registered one-cycle `pi_calculating` strobe replaces the
+  old multi-cycle PI pass window. Clear/disable zero the command without losing
+  the pending planner advance; `enable=0`/reset abort both.
 * `reference_position`, `remaining` and `stopping` are **24 bits**, not 25. The
   legal integer position is exactly −4 096…+4 095, which is 13 signed integer
-  bits plus 11 fraction bits. The accumulator is 25 bits. This is worth about
-  0.75 k and does not change the delivered numeric contract.
+  bits plus 11 fraction bits. The serial accumulator is 25 bits. This saved
+  about 0.75 k without changing the delivered numeric contract.
 * `CONTROL[1:0]` (the old Ki field) is now reserved/ignored. The SPI register is
   unchanged for host compatibility.
+* The Q12 handoff's planner-only measurement reset the combinational
+  `operand`/`operand_a` signals. Yosys then constant-folded them to zero
+  (`operand = 4'b0000`), producing a non-functional 12.9 k planner. That is why
+  its PI marginal was 16 k instead of the true ~10.7 k. **Never reset a signal
+  that is also driven by `always @*`; verify the netlist operand mux before
+  trusting a planner/PI-only area delta.**
 
-## 4. Tests
+## 4. P-only redesign: how much is really left?
 
-* `python3 -m pytest test/test_shared_controller.py -q` — both `STABLE_CONFIG`
-  values pass with the P-only oracle. The 96-offset PI cancellation sweep was
-  replaced by a one-clock clear sweep across the planner pass; the P stage has
-  no in-place rotation to protect.
-* `make -C test -B` — **9/9** integration cases pass. `full_speed_and_default_limits`
-  was updated from the retired 10 kHz assumption to the current 4 kHz / Q11
-  ceiling. `serial_reference_sampling` now checks the P publication edge and
-  `shared_engine_abort_phases` still passes.
+Measured standalone P variants (same flow, `kp_select`/clamp features removed
+one at a time):
+
+| P variant | area | delta |
+|---|---:|---:|
+| full P-only | 7,404 | — |
+| fixed Kp = 1 (gain mux deleted) | 6,509 | −0.9 k |
+| no `vmax` clamp (raw 16-bit output) | 4,891 | −2.5 k |
+| fixed gain + no clamp | **3,734** | **−3.7 k** |
+
+Those are the ceilings *with features deleted*. The clamp cannot simply
+disappear: it has to be reproduced in the step generator, and the first
+cross-module attempt measured **worse** (+0.35 k on the 25-bit revision). The
+gain mux is the documented `CONTROL[3:2]` feature.
+
+A serial P integrated into the planner ALU was also tried: the whole engine
+measured **26,750.7 µm²**, versus **~26.9 k** for planner + parallel P on that
+revision. Sharing the adder buys ~0.2 k because the clamp/compare schedule, not
+the ALU, is the cost.
+
+**Conclusion: a feature-preserving P redesign can plausibly recover 1.5–2 k,
+not the ~3.4 k needed. P micro-optimization is no longer the lever.**
+
+## 5. Feature/numeric cuts, measured or estimated
+
+| cut | local top | notes |
+|---|---:|---|
+| **Fix `vmax = 8191`** | **40,082.2** | keeps 8 acceleration codes; `PLAN[2:0]` reserved. DPL passed on this experiment (it reached DRT). |
+| Fix both `vmax` and `accel` | **39,728.7** | removes all PLAN profile selection; only −0.35 k beyond fixed vmax. |
+| Fix Kp to one code | ~−0.9 k | `CONTROL[3:2]` reserved. |
+| Move P clamp into step generator | measured worse in first attempt | needs a careful rework before it is worth retrying. |
+| Halve velocity ceiling (max 2000 steps/s) | ~−1 to −1.5 k estimated | keeps all 64 profile codes, but changes the delivered speed table and lets widths drop. Not yet built on this tree. |
+| SPI/stepgen/timebase contraction | ~1–2 k total | SPI frame staging or the stepgen 25-bit phase accumulator; both change documented contracts. |
+
+The 90 % headroom target corresponds to roughly **39.3 k local** using the
+observed CI ratios. Fixed vmax alone is ~40.1 k; fixed both is ~39.7 k. So even
+the profile cuts are only just at the line. A numeric descope or a second cut
+is likely needed if the current DRT experiment does not converge.
+
+## 6. CI history on this branch
+
+| commit | change | CI result |
+|---|---|---|
+| `5420187` | spec-preserving P-only split, 24-bit position | GPL **97.497 %**, DPL-0036 fail (42 instances) |
+| `5a1a897` | `PL_TARGET_DENSITY_PCT=80` | identical movable area and DPL fail |
+| `8d8fb97` | `PL_TARGET_DENSITY_PCT=40` | identical movable area and DPL fail |
+| `ad78ad6` | **experiment:** fixed `vmax=8191` | DPL passed; reached detailed routing. At time of writing run `43312425240` was still in DRT, with 2,631 violations after the 9th iteration (1,205 Metal2 shorts, 790 Metal3 shorts, 322 Metal4 shorts). Not yet a fit. |
+
+The `ad78ad6` experiment is **not the final intended design**. It demonstrates
+that detailed placement was density-limited and that the velocity LUT is the
+biggest cheap area lever, but its DRT congestion shows 40.1 k is still tight.
+
+## 7. Branch state / what to do next
+
+Current `HEAD` is `ad78ad6`, the fixed-`vmax` experiment. The last
+spec-preserving commit is `d1acbd8`.
+
+* If the experiment eventually routes cleanly: decide whether dropping
+  `PLAN[2:0]` velocity selection is acceptable, then update `info.md`,
+  `motion-planning.md` and the PLAN register description before merging.
+* If it fails in DRT: revert the experiment with
+  `git revert ad78ad6` (or restore `src/motion_engine.v` from `d1acbd8`) and
+  pick from the table in §5. The next cheapest combination is fixed `vmax` plus
+  one of: fixed Kp (~0.9 k), fixed acceleration (~0.6 k), or the numeric
+  velocity descope (~1–1.5 k).
+* Do not wait on local area alone. The CI GDS job is the fit authority, and
+  DPL/DRT have both now failed at different points.
+
+## 8. Tests
+
+* `python3 -m pytest test/test_shared_controller.py -q` — both
+  `STABLE_CONFIG` values pass with the P-only oracle. The 96-offset PI
+  cancellation sweep was replaced by a one-clock clear sweep across the planner
+  pass; the P stage has no in-place rotation to protect.
+* `make -C test -B` — **9/9** integration cases pass.
+  `full_speed_and_default_limits` was updated from the retired 10 kHz
+  assumption to the current 4 kHz / Q11 ceiling. `serial_reference_sampling`
+  checks the P publication edge; `shared_engine_abort_phases` passes.
 * `test_planner`, `test_compact_planner`, `test_pi`, `test_step_dir` remain
-  Q16-era reference tests for modules outside `PROJECT_SOURCES`.
+  Q16-era reference tests for modules outside `PROJECT_SOURCES`; the CI module
+  test job still fails on them. They are unrelated to the current P-only engine.
 
-## 5. If 90 % headroom is still required
+## 9. Do not retry
 
-The remaining ~4 k cannot come from the P stage alone: it is already about as
-small as a correct 16-bit P datapath gets, and moving its clamp into the step
-generator measured *worse*. The measured next steps, in order:
-
-1. **Fix the velocity table to `vmax = 8191`.** This is the single large
-   measured saving: current tree **40,082.2 µm²** (top) versus 42,718.6. It keeps
-   all eight acceleration codes and `PLAN[2:0]` becomes reserved. Estimated CI
-   total ≈47.7 k (≈92 %), probably enough for detailed placement. This is a
-   visible spec change (one velocity instead of eight).
-2. **Fix both profile tables** (`vmax = 8191`, `accel = 205`): **39,728.7 µm²**
-   top, estimated ≈91 %. Removes all PLAN profile selection.
-3. **Numeric descope** as in `q12-handoff.md` §8.3: halve the velocity ceiling so
-   `vmax`/`speed`/command fit 12 bits. This keeps all 8×8 profile codes but
-   changes the delivered speed table (max 2000 steps/s). Not yet measured on
-   this tree; expected to be comparable to option 1 plus a smaller P stage.
-4. **Non-engine blocks** (SPI 6.8 k, step generator 6.8 k, encoder 2.8 k,
-   timebase 1.9 k). Safe measured wins are only hundreds of µm²; the SPI frame
-   staging and step-generator phase accumulator are the only large candidates
-   left and both change a documented contract.
-
-The current branch deliberately keeps all 64 profiles and leaves the spec
-intact, so the CI GDS job stops at DPL. Pick one of the options above before
-expecting a green 1x1 GDS run.
-
-Do not retry the Q12 "planner-only" ablation, a parallel full PI, or a serial
-P-only inside the shared engine: the serial P-only variant measured 26,750.7 for
-the whole engine (only ~0.2 k better than planner + parallel P) because the
-clamp/compare schedule still costs the same as the parallel logic.
+* The Q12 "planner-only" ablation without checking the synthesized operand mux.
+* A parallel full PI.
+* A serial P-only inside the shared engine (≈0.2 k better, not worth the
+  scheduling complexity).
+* Moving the P clamp into the step generator without a fresh design; the first
+  attempt was worse.
+* `PL_TARGET_DENSITY_PCT` as a fix for DPL when the design is already at ~97 %
+  utilization — it did nothing.
