@@ -23,8 +23,9 @@ Motion enable assertion is synchronized. Raw low, `ena=0`, reset, or a sticky
 fault inhibits STEP/ENABLE immediately. Disable aborts, clears controller state,
 and discards the active command; re-enabling requires a new TARGET write. A target
 written while faulted cannot cause motion. Fault recovery requires reset.
-Hold reset across at least one rising clock edge because the planner uses
-synchronous reset. Other state and output suppression reset asynchronously.
+Hold reset across at least one rising clock edge because the shared planner/PI
+engine resets synchronously. Motion-pin suppression is immediate and does not
+wait for engine state to clear.
 
 A completed trajectory must have exact encoder feedback at the target for four
 control samples before At target asserts and Busy clears. The PI is cleared at
@@ -35,12 +36,12 @@ correction against the retained final reference without a new trajectory.
 
 ## Numerical format and lookup tables
 
-The integrated planner uses `FRACTION_BITS=16`, `LIMIT_WIDTH=20`:
+The shared controller uses fixed Q16 arithmetic:
 
 - Position reference: signed 29-bit integer position with 16 fractional bits.
 - Reference and commanded velocity: signed 21-bit steps/control-tick with 16
   fractional bits; speed limits are unsigned 20-bit values.
-- Acceleration: unsigned 20-bit steps/control-tick squared, 16 fractional bits.
+- Acceleration: unsigned 13-bit raw steps/control-tick squared, 16 fractional bits.
 - Gains: two-bit codes 00, 01, 10, 11 select 1/8, 1/4, 1/2, 1. CONTROL[3:2]
   selects Kp and CONTROL[1:0] selects Ki.
 
@@ -80,23 +81,25 @@ accelerates without displacement. Exact discrete stopping distance determines
 acceleration, cruise and braking. Final fractional displacement lands exactly on
 the target; the landing edge sets velocity zero and emits one-clock `done`.
 
-The integrated `compact_motion_planner` uses a generated 64-entry lookup table
+The integrated `shared_motion_controller` uses a generated 64-entry lookup table
 for the exact discrete stopping sums of the supported velocity/acceleration
 pairs. Values larger than every legal move are represented by an always-rejected
 sentinel; accepted stopping sums remain exact. Reachability bounds reduce stored
 stopping distance to 29 bits and the shared bit-serial accumulator to 30 bits.
 
-Each tick starts a calculation completing within 700 system clocks, before the
-next 10,000-clock control tick. Position and velocity are temporary arithmetic
-workspace while `calculating=1` and may only be sampled while idle. The top-level
-PI captures the previously completed reference on the same edge the next planner
-calculation starts. Target/settling decisions also exclude in-flight calculations.
+Each accepted tick starts PI sampling/calculation followed by planner advancement,
+completing within 2,000 clocks before the next 10,000-clock control tick. Position
+and velocity are temporary arithmetic workspace while combined `calculating=1`
+and may only be sampled while idle. PI uses the previously completed reference
+and sampled encoder value. Target/settling logic does not consume workspace;
+it uses planner busy/calculation status and integer target/feedback equality.
 Planner inputs remain stable while busy because SPI rejects writes. This permits
 `STABLE_CONFIG=1` to omit redundant target/profile registers. Disable/reset
 cancels an unfinished calculation; the next command starts from measured position.
 
-The old `motion_planner.v` remains as a standalone reference with its previous
-Q8/Q16 tests; it is excluded from the physical source list. No speed, acceleration,
+The old `motion_planner.v`, `compact_motion_planner.v` and `pi_controller.v` remain
+as independently tested references, excluded from the physical source list.
+No speed, acceleration,
 gain, position-range, or Q16 fractional-resolution setting is removed.
 
 ## PI arithmetic
@@ -107,18 +110,22 @@ subtraction. Command is `feedforward + Kp*error + old_integral`, clamped to the
 selected velocity limit. Then `Ki*error` is added to the integral and clamped to
 that same magnitude. Integration freezes if the command is beyond a limit and
 the error would push it farther into saturation. Reduced limits still clamp the
-stored integral. All intermediate sums are signed 32-bit and cannot overflow over
-the defined position range. Gain shifts round negative values toward minus infinity.
+stored integral. The serial signed sum streams include 31 bits, enough for the
+defined position range without overflow. Gain shifts round negative values toward
+minus infinity.
 
-The top level selects `SERIAL=1, STABLE_CONFIG=1`. An idle tick snapshots error
-and feedforward. Gains/limit are read live and must remain stable during work;
-the top-level busy/write interlock enforces that condition. Command and saturation
-are published together within 450clocks. Internal integral storage is workspace
-while calculating and must not be sampled until completion. Legacy parallel mode
-remains available for reference tests. Ticks during work are ignored.
+The top level selects shared-engine `STABLE_CONFIG=1`. An idle tick captures
+feedback before serial error calculation; the old reference and speed are
+consumed before planner advancement. Gains/limit are read live and stay stable
+through the busy/write interlock. Command and saturation publish together before
+planner work starts. Internal integral storage is workspace while calculating.
+Ticks during work are ignored. Standalone legacy PI modes remain in reference
+tests; see [shared scheduling and register lifetimes](shared-controller.md).
 
 A launch, disable, or final reference/feedback match clears PI state independent
-of tick. The gains are discrete gains per 1 kHz sample, not gains per second.
+of tick. PI-only cancellation may finish restoring a shared ring after command
+and integral clear; it cannot publish a cancelled result. The gains are discrete
+gains per 1 kHz sample, not gains per second.
 Planner acceleration bounds the reference; PI correction may change the actual
 step rate faster while remaining under the selected speed limit. Hardware tuning
 must account for this distinction and the real plant dynamics.
@@ -157,8 +164,8 @@ check displacement, acceleration, saturation, exact landing, timing and rate cou
 Port-level motor tests model legal encoder feedback, dropped steps and disturbances.
 This idealized digital model does not establish real motor stability or tuning.
 
-Controlled full-top GF180 standard-cell synthesis measures 61,318.522 um²,
-2,480 cells and 392 flip-flops, a 56.5% area reduction from the original controller
+Controlled full-top GF180 standard-cell synthesis measures 58,174.995 um²,
+2,372 cells and 353 flip-flops, a 58.7% area reduction from the original controller
 under the same local mapping flow. The mandatory 1x1 core is only 51,966.970 um²,
 so this is still over budget. No 1x1 fit, post-route timing or physical-signoff
 claim follows from these results. See `area-optimization.md`.
