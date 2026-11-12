@@ -228,8 +228,8 @@ I measured the PI's marginal cost directly (planner-only engine 12,934 versus
 full engine 28,915 → **15,981**). To test whether that is serialisation
 overhead, I wrote a fresh dedicated **parallel** PI with every current feature
 (integer error, 4 kp/ki codes, feedforward, command clamp + `saturated`,
-integral clamp, anti-windup freeze; prototype in `/tmp/pi/pi_parallel.v`,
-reproduce it in ~50 lines):
+integral clamp, anti-windup freeze). The prototypes are checked in under
+`experiments/` (see that directory's README):
 
 | implementation | area | cells |
 |---|---:|---:|
@@ -262,7 +262,7 @@ worth only 2.1 k now — the big LUT win is already banked.
 ## 8. Suggested next experiments, in order
 
 1. **(cheap, decisive) Prototype the P-only dedicated PI in situ.** Take
-   `/tmp/pi/pi_p_only.v`'s approach: a sibling `pi_parallel` module driven from
+   `experiments/pi_parallel_p_only.v`'s approach: a sibling `pi_parallel` module driven from
    the same tick, feeding `velocity_command` and a one-cycle `pi_calculating`
    strobe, with the planner's serial engine no longer containing PI states
    (i.e. start from the planner-only shape that measures 12.9 k). Expected
@@ -270,6 +270,9 @@ worth only 2.1 k now — the big LUT win is already banked.
    update `test/test_shared_controller.py` (the oracle drops the integrator; the
    96-offset cancellation sweep becomes trivial because there is no in-place
    rotation), and note in `docs/implementation.md` that anti-windup is gone.
+   `experiments/tb_engine_sweep.v` is an Icarus bench that prints position /
+   speed / brake-sum per tick for `+goal=<steps> +code=<profile>`; use it to
+   diff the RTL against the Python oracle when you change the algorithm.
 2. **If full PI is non-negotiable**, the only way to the 100 % line is ~4.3 k out
    of the non-PI blocks (~18.3 k total: step_dir 6.8, SPI 6.8, encoder 2.8,
    timebase 1.9). Untried ideas: share the step generator's 25-bit phase
