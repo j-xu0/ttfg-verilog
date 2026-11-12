@@ -133,8 +133,8 @@ biggest cheap area lever, but its DRT congestion shows 40.1 k is still tight.
 
 ## 7. Branch state / what to do next
 
-Current `HEAD` is `ad78ad6`, the fixed-`vmax` experiment. The last
-spec-preserving commit is `d1acbd8`.
+The RTL at `HEAD` is the fixed-`vmax` experiment from `ad78ad6`; the doc commit
+sits on top of it. The last spec-preserving RTL commit is `d1acbd8`.
 
 * If the experiment eventually routes cleanly: decide whether dropping
   `PLAN[2:0]` velocity selection is acceptable, then update `info.md`,
