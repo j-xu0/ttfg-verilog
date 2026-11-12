@@ -251,6 +251,9 @@ the 1.19 assumed earlier, so local deltas translate almost 1:1 and the earlier
 on the previous revision) would now land ~38 k raw ≈ **86 %**.
 
 Remaining feature-preserving budget is small: `work`/PI folding ≈ −1 k,
-narrow PI accumulator ≈ −0.8 k (measured −0.17 k for the tap part alone). The
-only measured ways below 90 % are the descopes: PI deleted ≈ 86 %, or
-fix-profiles (−3.3 k) + P-only (−1.6 k) + the 2 k of cleanups ≈ 39 k raw ≈ 92 %.
+narrow PI accumulator ≈ −0.8 k (measured −0.17 k for the tap part alone).
+Working the 90 % algebra with this run's numbers — movable `m` must satisfy
+`(1.14006 m + 1,527.9) / 51,967 <= 0.90`, i.e. `m <= 39,671 um²` — the measured
+endings are: PI deleted 38 k raw ≈ **86 %** (fits), or fix-profiles (−3.3 k) +
+P-only (−1.6 k) + the ~2 k of cleanups ≈ 41 k raw ≈ **93 %** (passes GPL, but
+drops three deliverables and keeps under 10 % routing headroom).
