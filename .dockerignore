@@ -1,0 +1,12 @@
+.git
+.venv
+.pytest_cache
+**/__pycache__
+test/output
+test/sim_build
+test/results.xml
+test/waves
+*.fst
+*.vcd
+runs
+tt_submission

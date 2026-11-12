@@ -1,14 +1,67 @@
 # Verification
 
-Install Icarus Verilog and make, then run from the repository root:
+For a self-contained RTL test environment, build and run the container from the
+repository root. Python 3.11, Icarus Verilog, make, and the pinned Python test
+dependencies are included; nothing needs to be installed on the host besides
+Docker:
+
+```sh
+docker build -f test/Dockerfile -t ttfg-tests .
+docker run --rm -it ttfg-tests --jobs 4
+```
+
+Pass suite names after the image name for a shorter run:
+
+```sh
+docker run --rm -it ttfg-tests spi encoder timebase
+```
+
+The `-it` enables colored badges and live progress. Omit it in CI. Tests run
+as an unprivileged user inside the image, without writing caches to the host.
+Rebuild after source changes. Logs and waveforms stay inside the container;
+to keep them, name the container and copy results out before removing it:
+
+```sh
+docker run --name ttfg-test-results ttfg-tests spi encoder timebase
+docker cp ttfg-test-results:/work/test/output ./test-output
+docker rm ttfg-test-results
+```
+
+For a native setup, install Icarus Verilog and make, then run from the repository root:
 
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r test/requirements.txt
-python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py test/test_compact_planner.py test/test_pi.py test/test_step_dir.py test/test_shared_controller.py -q
-make -C test -B
+python scripts/run_tests.py --jobs 4
 ```
+
+`--jobs 4` runs up to four suites concurrently. Integration, STEP/DIR, compact
+planner, and shared controller start first to overlap the longest simulations.
+Use `--jobs 1` (the default) for serial execution in the requested suite order.
+The final report keeps that order even when suites finish out of order. Each
+module suite uses separate temporary builds, pytest caches, logs, and XML results;
+integration retains its own build, waveform, and XML paths. Repeated suite names
+are rejected to prevent output collisions.
+
+The runner shows live elapsed-time lines for active suites in a terminal, a
+PASS/FAIL result for each suite, and a final count and duration. Redirected output and CI use plain,
+append-only lines; set `NO_COLOR=1` to disable terminal colors. Successful
+compiler/simulator output is saved under `test/output/runner/`. The final report
+shows every suite with its counts, timing, and log path for failures. Add
+`--verbose` to print the last 60 lines of failed logs before the compact report. All selected suites run even if
+an earlier suite fails, and any failed command, missing/invalid report, or XML
+failure/error makes the runner exit nonzero. Ctrl-C stops every active simulator process
+group and exits with status 130.
+
+Run selected suites with `python scripts/run_tests.py spi encoder`, or use
+`python scripts/run_tests.py integration` for top-level tests only. Use
+`--log-dir /path/to/logs` to choose a log directory. The final test count combines
+pytest cases (including parameterized cases) for module suites with cocotb cases
+for integration; it does not count assertions inside a case. Unit JUnit reports
+are stored alongside their logs; integration keeps `test/results.xml` and
+`test/tb.fst`. The original pytest and make commands remain available for raw
+simulator output.
 
 The pytest runners compile each standalone module and run cocotb assertions.
 Each suite contains many directed cases:
@@ -54,7 +107,7 @@ flow. Place its powered netlist at `test/gate_level_netlist.v` and point
 `PDK_ROOT` at a PDK installation containing the `gf180mcuD` directory:
 
 ```sh
-make -C test -B GATES=yes
+python scripts/run_tests.py --gates
 ```
 
 The hierarchy-dependent wiring, serial-sampling and phase-abort tests are skipped with `GATES=yes`;

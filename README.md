@@ -30,14 +30,20 @@ that budget: controlled GF180 synthesis measures 58,175 um² versus the original
 [the optimization results](docs/area-optimization.md) and
 [the hardening history](docs/hardening.md).
 
+Run in a container with Python and the simulator included:
+
+```sh
+docker build -f test/Dockerfile -t ttfg-tests .
+docker run --rm -it ttfg-tests --jobs 4
+```
+
 With Python, Icarus Verilog, and make installed, run from the repository root:
 
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r test/requirements.txt
-python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py test/test_compact_planner.py test/test_pi.py test/test_step_dir.py -q
-make -C test -B
+python scripts/run_tests.py --jobs 4
 ```
 
 The test workflow runs both unit and integration simulations. The separate GDS
