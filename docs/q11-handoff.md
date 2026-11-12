@@ -257,3 +257,6 @@ Working the 90 % algebra with this run's numbers — movable `m` must satisfy
 endings are: PI deleted 38 k raw ≈ **86 %** (fits), or fix-profiles (−3.3 k) +
 P-only (−1.6 k) + the ~2 k of cleanups ≈ 41 k raw ≈ **93 %** (passes GPL, but
 drops three deliverables and keeps under 10 % routing headroom).
+
+> **Next:** see [`q12-handoff.md`](q12-handoff.md) — exact-Q11-brake rewrite,
+> current CI numbers, the measured PI floor and the remaining option space.
