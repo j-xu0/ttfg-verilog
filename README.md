@@ -34,7 +34,7 @@ Run in a container with Python and the simulator included:
 
 ```sh
 docker build -f test/Dockerfile -t ttfg-tests .
-docker run --rm -it ttfg-tests
+docker run --rm -it ttfg-tests --jobs 4
 ```
 
 With Python, Icarus Verilog, and make installed, run from the repository root:
@@ -43,7 +43,7 @@ With Python, Icarus Verilog, and make installed, run from the repository root:
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r test/requirements.txt
-python scripts/run_tests.py
+python scripts/run_tests.py --jobs 4
 ```
 
 The test workflow runs both unit and integration simulations. The separate GDS

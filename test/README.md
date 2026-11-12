@@ -7,7 +7,7 @@ Docker:
 
 ```sh
 docker build -f test/Dockerfile -t ttfg-tests .
-docker run --rm -it ttfg-tests
+docker run --rm -it ttfg-tests --jobs 4
 ```
 
 Pass suite names after the image name for a shorter run:
@@ -33,18 +33,26 @@ For a native setup, install Icarus Verilog and make, then run from the repositor
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r test/requirements.txt
-python scripts/run_tests.py
+python scripts/run_tests.py --jobs 4
 ```
 
-The runner shows a live elapsed-time line in a terminal, a PASS/FAIL result for
-each suite, and a final count and duration. Redirected output and CI use plain,
+`--jobs 4` runs up to four suites concurrently. Integration, STEP/DIR, compact
+planner, and shared controller start first to overlap the longest simulations.
+Use `--jobs 1` (the default) for serial execution in the requested suite order.
+The final report keeps that order even when suites finish out of order. Each
+module suite uses separate temporary builds, pytest caches, logs, and XML results;
+integration retains its own build, waveform, and XML paths. Repeated suite names
+are rejected to prevent output collisions.
+
+The runner shows live elapsed-time lines for active suites in a terminal, a
+PASS/FAIL result for each suite, and a final count and duration. Redirected output and CI use plain,
 append-only lines; set `NO_COLOR=1` to disable terminal colors. Successful
 compiler/simulator output is saved under `test/output/runner/`. The final report
 shows every suite with its counts, timing, and log path for failures. Add
 `--verbose` to print the last 60 lines of failed logs before the compact report. All selected suites run even if
 an earlier suite fails, and any failed command, missing/invalid report, or XML
-failure/error makes the runner exit nonzero. Ctrl-C stops the active suite and
-exits with status 130.
+failure/error makes the runner exit nonzero. Ctrl-C stops every active simulator process
+group and exits with status 130.
 
 Run selected suites with `python scripts/run_tests.py spi encoder`, or use
 `python scripts/run_tests.py integration` for top-level tests only. Use
