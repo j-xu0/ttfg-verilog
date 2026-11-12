@@ -179,7 +179,7 @@ async def closed_loop_moves_and_disturbance(dut):
     await initialize(dut)
     motor = MotorModel(dut)
     cocotb.start_soon(motor.run())
-    await spi_frame(dut, 0xA000)  # Kp=Ki=1/8
+    await spi_frame(dut, 0xA000)  # Kp=1/8
     await spi_frame(dut, 0xC03F)  # 10000 steps/s, ~100000 steps/s^2
     await spi_frame(dut, 0x8004)  # configure target while disabled
     await Timer(100, unit="us")
@@ -299,10 +299,10 @@ async def full_speed_and_default_limits(dut):
     await wait_settled(dut, timeout_us=400000)
     assert motor.position == 1200
     gaps = [b-a for a, b in zip(motor.rises, motor.rises[1:])]
-    assert min(gaps) >= 100000, "exceeded 10 kHz cap"
-    assert gaps.count(100000) > 5, "did not exercise the 10 kHz ceiling"
-    # Lowest velocity/acceleration codes exercise the Q16 low-acceleration path
-    # through SPI, planning, PI and actual encoder feedback.
+    assert min(gaps) >= 250000, "exceeded 4 kHz cap"
+    assert gaps.count(250000) > 5, "did not exercise the 4 kHz ceiling"
+    # Lowest velocity/acceleration codes exercise the Q11 low-acceleration path
+    # through SPI, planning, P feedback and actual encoder feedback.
     await spi_frame(dut, 0xC000)
     await spi_frame(dut, 0x8000 | 1201)
     await wait_settled(dut, timeout_us=300000)
@@ -312,8 +312,9 @@ async def full_speed_and_default_limits(dut):
 
 @cocotb.test(skip=os.environ.get("GATES") == "yes")
 async def serial_reference_sampling(dut):
-    """PI snapshots a completed reference before planner workspace is reused."""
+    """P feedback snapshots the completed reference before the planner reuses it."""
     await initialize(dut)
+    await spi_frame(dut, 0xA03F)  # CONTROL: Kp = 1 (upper two bits)
     await spi_frame(dut, 0xC03F)
     await spi_frame(dut, 0x8004)
     set_input(dut, 5, 1)
@@ -323,7 +324,6 @@ async def serial_reference_sampling(dut):
         raw = int(signal.value)
         return raw - (1 << len(signal)) if raw >> (len(signal)-1) else raw
 
-    integral = 0
     for _ in range(5):
         # The first interval also includes enable synchronization and phase.
         for _ in range(10020):
@@ -337,30 +337,32 @@ async def serial_reference_sampling(dut):
         reference = signed(top.reference_position)
         feedback = signed(top.position)
         feedforward = signed(top.reference_velocity)
-        # Q11 engine units: the error is the integer reference-feedback
-        # difference scaled to Q11, kp=ki=3 (control 0x3F) means shift 0, and
-        # the clamp is the profile velocity limit (plan code 4 -> 4096).
+        # Q11 engine units: integer error scaled by 2048, kp=3 (control 0x3F)
+        # means unity gain, and the clamp is the plan-code-4 velocity limit.
         vmax = 4096
         error = (reference // 2048 - feedback) * 2048
-        total = feedforward + error + integral
+        total = feedforward + error
         command = max(-vmax, min(vmax, total))
         saturated = int(command != total)
-        if not ((total > vmax and error > 0) or (total < -vmax and error < 0)):
-            integral = max(-vmax, min(vmax, integral + error))
         await RisingEdge(dut.clk)
         await Timer(1, unit="ns")
-        assert not int(top.planner_calculating.value)
+        assert not int(top.planner_calculating.value) or int(top.engine_calculating.value)
         assert int(top.pi_calculating.value)
-        assert int(top.controller.work.value) & 8191 == feedback & 8191
+        assert signed(top.velocity_command) == command
+        assert int(top.pi_saturated.value) == saturated
+        # The command is registered at the tick edge: a later encoder sample
+        # must not change this tick's published value.
+        set_input(dut, 3, 1)
+        await Timer(1000, unit="ns")
+        assert signed(top.velocity_command) == command
         for _ in range(2000):
             if not int(top.pi_calculating.value):
                 break
             await RisingEdge(dut.clk)
             await Timer(1, unit="ns")
         else:
-            raise AssertionError("PI exceeded shared-engine deadline")
+            raise AssertionError("P strobe exceeded deadline")
         assert signed(top.velocity_command) == command
-        assert int(top.pi_saturated.value) == saturated
         assert int(top.planner_calculating.value)
         for _ in range(2000):
             if not int(top.engine_calculating.value):
@@ -368,9 +370,10 @@ async def serial_reference_sampling(dut):
             await RisingEdge(dut.clk)
             await Timer(1, unit="ns")
         else:
-            raise AssertionError("planner exceeded shared-engine deadline")
+            raise AssertionError("planner exceeded engine deadline")
         assert not int(top.planner_calculating.value)
         assert not int(top.pi_calculating.value)
+        assert signed(top.velocity_command) == command
 
 
 @cocotb.test(skip=os.environ.get("GATES") == "yes")
@@ -422,7 +425,7 @@ async def spi_init_short_move(dut):
     motor = MotorModel(dut)
     cocotb.start_soon(motor.run())
 
-    await spi_frame(dut, 0xA004)  # CONTROL: Kp = 1/4, Ki = 1/8
+    await spi_frame(dut, 0xA004)  # CONTROL: Kp = 1/4 (Ki bits reserved)
     await spi_frame(dut, 0xC03F)  # PLAN: 10000 steps/s, ~100000 steps/s^2
     await spi_frame(dut, 0x8040)  # TARGET: +64 steps, queued while disabled
     await Timer(100, unit="us")

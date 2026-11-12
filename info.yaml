@@ -22,6 +22,8 @@ project:
     - "quadrature_decoder.v"
     - "control_timebase.v"
     - "shared_motion_controller.v"
+    - "motion_engine.v"
+    - "pi_p_controller.v"
     - "step_dir_generator.v"
 
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.

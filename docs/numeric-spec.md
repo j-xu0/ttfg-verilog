@@ -23,15 +23,15 @@ integer bits, which is valid only while the velocity ceiling stays below
 |---|---|---|---:|---:|---:|---|---|---|
 | `target` / `latched_goal` | signed | `[12:0]` | 12 | 0 | 13 | −4 096 … +4 095 | ±4 095 steps | 1 step |
 | `start_position` | signed | `[12:0]` | 12 | 0 | 13 | −4 096 … +4 095 | ±4 095 steps | 1 step |
-| `reference_position` | signed | `[24:0]` | 14 | 11 | 25 | −8 192 … +8 191 steps | reaches ±4 095 targets | 1/2048 step |
-| `remaining` (scratch) | unsigned | `[24:0]` | 14 | 11 | 25 | 0 … 16 777 215 | 0 … 8 191 steps | 1/2048 step |
-| `stopping` (brake sum) | unsigned | `[24:0]` | 14 | 11 | 25 | 0 … 16 777 215 | 0 … 8 191 steps | 1/2048 step |
+| `reference_position` | signed | `[23:0]` | 13 | 11 | 24 | −8 388 608 … +8 386 560 | reaches ±4 096/4 095 targets | 1/2048 step |
+| `remaining` (scratch) | unsigned | `[23:0]` | 13 | 11 | 24 | 0 … 16 777 215 | 0 … 8 191 steps | 1/2048 step |
+| `stopping` (brake sum) | unsigned | `[23:0]` | 13 | 11 | 24 | 0 … 16 777 215 | 0 … 8 191 steps | 1/2048 step |
 | plan LUT (`vmax`, `accel`) | — | 13 / 11 | — | — | 24 per profile | from `plan_lut.vh` | — | — |
 
 `reference_position` and `reference_velocity` share the Q11 scale, so each control
-tick is an exact `pos += v`. The 14-bit integer part holds ±4 095 plus up to four
-steps of per-tick overshoot, and the register doubles as scratch for the signed
-remaining distance during the brake decision.
+tick is an exact `pos += v`. The 13-bit signed integer part holds exactly −4 096 … +4 095, so the 24-bit
+register covers the whole legal position range and doubles as scratch for the
+signed remaining distance during the brake decision.
 
 The brake sum is maintained **exactly** in Q11 as `S(s) = s + S(s-a)`:
 
@@ -45,5 +45,8 @@ lookup table and no sentinel: unreachable profile pairs are simply never
 accepted. Within one step of the target the reference snaps exactly onto it, so
 the resting error is zero (sub-step residue is discarded, not accumulated).
 
-Storage total for the engine registers: position 25, brake sum 25, speed 13,
-accumulator 26, PI integral/command 14 each.
+Storage total for the engine registers: position 24, brake sum 24, speed 13,
+accumulator 25, sampled measured/P command 14. Feedback is **P-only**: error is
+`(reference[23:11] - measured) << 11`, the Kp code selects 1/8…1, and the
+command `feedforward + Kp*error` is clamped to the profile velocity limit.
+There is no integrator, no Ki register, and no anti-windup path.

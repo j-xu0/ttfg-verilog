@@ -1,5 +1,10 @@
 # Q12 handoff: exact Q11 brake is in, here is what is left
 
+> **Superseded area conclusion:** [`q13-handoff.md`](q13-handoff.md) shows the
+> §7 planner-only ablation was constant-folded (operand muxes forced to zero),
+> so the true PI marginal was ~10.7 k, not 16 k. Read Q13 before planning the
+> next area move.
+
 Date: 2026-11-12. Branch `tmp/q8-area-test`. Author of this note: the agent that
 did the exact-brake rewrite. Read this together with
 [`q11-handoff.md`](q11-handoff.md) (CI history, rejected experiments),

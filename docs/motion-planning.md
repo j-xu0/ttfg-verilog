@@ -43,7 +43,8 @@ The shared controller uses fixed Q16 arithmetic:
   fractional bits; speed limits are unsigned 20-bit values.
 - Acceleration: unsigned 13-bit raw steps/control-tick squared, 16 fractional bits.
 - Gains: two-bit codes 00, 01, 10, 11 select 1/8, 1/4, 1/2, 1. CONTROL[3:2]
-  selects Kp and CONTROL[1:0] selects Ki.
+  selects Kp. CONTROL[1:0] were Ki and are now reserved/ignored in the P-only
+  integrated engine.
 
 The detailed proposal's 1 kHz loop and acceleration endpoints are used. Intermediate
 lookup entries are explicit implementation choices; the proposals omit them.
@@ -107,6 +108,15 @@ arithmetic), `compact_motion_planner.v` and `pi_controller.v` remain
 as independently tested references, excluded from the physical source list.
 No speed, acceleration,
 gain, position-range, or Q16 fractional-resolution setting is removed.
+
+## Feedback arithmetic
+
+> **Current integrated engine (Q11, 1x1 area revision).** The physical design is
+> P-only: `reference_position[23:0]` is Q11, error is
+> `(reference[23:11] - measured) << 11`, Kp selects 1/8…1, and the command is
+> `feedforward + Kp*error` clamped to the profile velocity limit. The integrator,
+> Ki register and anti-windup path were removed. The Q16 PI description below is
+> retained for the standalone `pi_controller.v` reference and its unit tests.
 
 ## PI arithmetic
 
