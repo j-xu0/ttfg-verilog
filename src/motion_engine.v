@@ -68,7 +68,7 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
         endcase
     end
     // EXPERIMENT: fixed maximum velocity, acceleration still plan-selected.
-    wire [12:0] profile_limit = 13'd8191;
+    wire [12:0] profile_limit = profile_velocity(profile[2:0]);
     assign vmax = profile_limit;
     wire [10:0] accel = profile_acceleration(profile[5:3]);
     wire signed [12:0] pos_int = reference_position[23:11];

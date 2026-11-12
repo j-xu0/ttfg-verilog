@@ -20,7 +20,7 @@ module compact_motion_planner #(parameter integer STABLE_CONFIG = 0) (
     output reg busy, done,
     output wire calculating
 );
-`include "plan_lut.vh"
+`include "plan_lut_q16.vh"
     localparam [4:0] IDLE=0, ADVANCE=2, BEGIN_DIST=3, DIST=4,
         TAIL_SPEED=5, TAIL_ACCEL=6, TAIL_LIMIT=7, BEGIN_ACCEL=8, ACCEL=9,
         CAP=10, STOP_ADD_A=11, STOP=12, TEST_NEW=13, TEST_OLD=14,
