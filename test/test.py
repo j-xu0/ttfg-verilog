@@ -337,13 +337,16 @@ async def serial_reference_sampling(dut):
         reference = signed(top.reference_position)
         feedback = signed(top.position)
         feedforward = signed(top.reference_velocity)
-        error = reference - feedback*65536
-        total = feedforward + error//8 + integral
-        command = max(-655360, min(655360, total))
+        # Q11 engine units: the error is the integer reference-feedback
+        # difference scaled to Q11, kp=ki=3 (control 0x3F) means shift 0, and
+        # the clamp is the profile velocity limit (plan code 4 -> 4096).
+        vmax = 4096
+        error = (reference // 2048 - feedback) * 2048
+        total = feedforward + error + integral
+        command = max(-vmax, min(vmax, total))
         saturated = int(command != total)
-        if not ((total > 655360 and error > 0) or
-                (total < -655360 and error < 0)):
-            integral = max(-655360, min(655360, integral + error//8))
+        if not ((total > vmax and error > 0) or (total < -vmax and error < 0)):
+            integral = max(-vmax, min(vmax, integral + error))
         await RisingEdge(dut.clk)
         await Timer(1, unit="ns")
         assert not int(top.planner_calculating.value)
