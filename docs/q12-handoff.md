@@ -265,8 +265,8 @@ worth only 2.1 k now — the big LUT win is already banked.
 ## 8. Suggested next experiments, in order
 
 1. **(cheap, decisive) Prototype the P-only dedicated PI in situ.** Take
-   `experiments/pi_parallel_p_only.v`'s approach: a sibling `pi_parallel` module driven from
-   the same tick, feeding `velocity_command` and a one-cycle `pi_calculating`
+   `experiments/pi_parallel_p_only.v` as the module: it is driven from the same
+   tick, feeds `velocity_command` and a one-cycle `pi_calculating` strobe, and
    strobe, with the planner's serial engine no longer containing PI states
    (i.e. start from the planner-only shape that measures 12.9 k). Expected
    ~39.9 k local ≈ **92 %**, profiles intact. This changes the PI contract:
@@ -318,7 +318,8 @@ worth only 2.1 k now — the big LUT win is already banked.
 * Pushed: `8f7189c` "Port integration PI oracle to Q11 engine units", on top of
   `36a5a5f` "Exact Q11 brake and serial position advance for 1x1 area".
   CI: gds fail (110.03 %), test fail (pre-existing Q16 oracles), docs pass.
-* Local only, unpushed, docs-only: `943ce64` (CI record appended to
-  `q11-handoff.md`), `4748e60` (90 % algebra correction). Push them with the
-  next code change.
+* Local only, unpushed (5 commits, docs/prototypes only): `943ce64` (CI record
+  appended to `q11-handoff.md`), `4748e60` (90 % algebra correction), `5811c4e`
+  (this doc), `3f5f1f3`/`55a69af` (`experiments/` prototypes + bench). Push them
+  with the next code change.
 * Branch map unchanged from `q11-handoff.md`: only `tmp/q8-area-test` is ours.
