@@ -18,6 +18,7 @@ The numerical and driver-interface choices are documented below. GF180 tile fit,
 - [Interface, pinout, and timing](docs/info.md)
 - [Implementation steps and unresolved proposal details](docs/implementation.md)
 - [Running the tests](test/README.md)
+- [Understanding the waveforms and waveform tooling](docs/waveforms.md)
 
 The top module is `tt_um_j_xu0_stepper`. The GF180 build uses `gf180mcuD` and the
 repository's existing `ttgf26a` workflow. The system clock target is **10 MHz**;

@@ -15,7 +15,7 @@ Each suite contains many directed cases:
 
 - Timebase and planner: standalone motion-building-block tests described in
   [the motion-planning contract](../docs/motion-planning.md), including Q8/Q16
-  equivalence and serial command preparation. The standalone compact planner
+  equivalence and mirror-rule trapezoid/triangle coverage. The standalone compact planner
   separately checks all 64 profiles, sentinel bounds, stable-config mode, transient
   workspace sampling, mid-calculation aborts, and generated ROM reproducibility.
 - Shared controller: both captured/stable configurations, all profiles and gain
@@ -35,13 +35,15 @@ Each suite contains many directed cases:
   all invalid two-bit transitions, sticky fault, counting after fault, signed
   wrap in both directions, and reset recovery.
 
-The Makefile compiles `tt_um_j_xu0_stepper` through `tb.v` and runs eight integration
+The Makefile compiles `tt_um_j_xu0_stepper` through `tb.v` and runs nine integration
 tests at 10 MHz clk / 500 kHz SPI: pins/status/reset, RTL wiring, short moves with
 a lost step and shaft disturbance, abort/fault recovery, both absolute signed
 boundaries, and a long move reaching the 10 kHz pulse ceiling followed by the
 lowest PLAN codes. The seventh test checks RTL serial-reference sampling before
 workspace reuse; the eighth checks raw disable/reset during both shared-engine
-phases and prevents restart. Shared module tests also sweep 768 transient PI
+phases and prevents restart. The ninth is the directed waveform scenario: three
+SPI setup writes while disabled, then a 64-step accel/decel-only move with no
+cruise, ending in an at-target status read. Shared module tests also sweep 768 transient PI
 cancellations and retain exact trajectory/PI oracles. Motor-model tests use external pins with one legal encoder
 transition per STEP edge. They verify digital feedback
 behavior, not a real motor's mechanics or tuning. Results are `test/results.xml`

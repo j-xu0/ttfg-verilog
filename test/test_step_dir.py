@@ -213,6 +213,58 @@ class UnreducedNCO:
 
 
 @cocotb.test()
+async def rate_demo(dut):
+    """Low then high command over equal windows; runs first in the trace.
+
+    This is the visual introduction to the generated waveform: a low command
+    produces a handful of pulses, then the maximum command produces a dense
+    train over exactly the same number of clocks.
+    """
+    p = json.loads(os.environ["STEP_TEST_PARAMS"])
+    # Ask the DUT for its implemented clamp rather than assuming the Q16 scale,
+    # so the demo also runs on the Q8 area-experiment variant.
+    over_range = (1 << (len(dut.velocity_command) - 1)) - 1
+    command(dut, over_range)
+    await Timer(1, unit="ns")  # combinational probe, no clock edge
+    maximum = int(dut.bounded_magnitude.value)
+    low = max(maximum // 8, 1)
+    if low == maximum:
+        dut._log.info("rate_demo: MAX_STEP_HZ too small for a contrast, skipping")
+        return
+    # Bound the wait: the low command is at most 8x the maximum step period.
+    patience = 16 * p["CLOCK_HZ"] // max(p["MAX_STEP_HZ"], 1) + 1000
+    window = None
+    counts = {}
+    for velocity, label in ((low, "low"), (maximum, "high")):
+        await reset(dut)
+        command(dut, velocity)
+        monitor = Monitor(dut, p)
+        while len(monitor.rises) < 2:
+            assert monitor.time <= patience, (label, "no pulses")
+            await monitor.run(1)
+        # Measure the actual spacing instead of predicting it: in the
+        # configurations where the pulse contract is longer than the DDS
+        # period, the real spacing is a stretched multiple of the period.
+        spacing = monitor.rises[-1][0] - monitor.rises[-2][0]
+        if window is None:
+            window = 4 * spacing
+        before = len(monitor.rises)
+        await monitor.run(window)
+        observed = len(monitor.rises) - before
+        expected = window / spacing
+        assert abs(observed - expected) <= 1, (label, velocity, observed, expected)
+        counts[label] = observed
+        dut._log.info("rate_demo %s: command %d, %d steps in %d clocks (expect %.1f)",
+                      label, velocity, observed, window, expected)
+        command(dut, 0)
+        await monitor.run(max(window // 8, 10))
+    assert counts["high"] > counts["low"], (counts, window)
+    dut._log.info("rate_demo: %d steps at command %d vs %d at command %d over "
+                  "the same %d-clock window",
+                  counts["low"], low, counts["high"], maximum, window)
+
+
+@cocotb.test()
 async def nco_old_algorithm_equivalence(dut):
     import math
     import random
@@ -336,6 +388,6 @@ def test_step_dir_exact_nco(tmp_path, configuration):
                  hdl_toplevel="step_dir_generator", parameters=params,
                  build_dir=tmp_path / "nco_build", timescale=("1ns", "1ps"), always=True)
     runner.test(hdl_toplevel="step_dir_generator", test_module="test_step_dir",
-                test_filter="nco_old_algorithm_equivalence",
+                test_filter="(rate_demo|nco_old_algorithm_equivalence)",
                 test_dir=Path(__file__).parent, extra_env={"STEP_TEST_PARAMS": json.dumps(params)},
                 results_xml=str(tmp_path / "nco_results.xml"))

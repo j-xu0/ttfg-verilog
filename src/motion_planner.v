@@ -4,7 +4,7 @@
  */
 `default_nettype none
 
-// Discrete trapezoidal reference generator; motor pulse generation is external.
+// Simple mirror-rule reference generator; motor pulse generation is external.
 // start is sampled on ANY clock edge when enable && !busy (not only on tick).
 // The host must pulse start; holding it high can start another move after done.
 // Commands latch signed integer 13-bit positions and unsigned fixed-point
@@ -19,10 +19,13 @@
 // previous reference_velocity, then chooses the next speed. The first tick
 // therefore accelerates without displacement. Completion lands at zero velocity.
 // Position never wraps.
-// SERIAL_SETUP=0 computes exact stopping distances combinationally with variable
-// division/products. SERIAL_SETUP=1 uses bounded serial command setup, then exact
-// per-tick stopping recurrences. Both configurations require GF180 area/timing
-// assessment; simulation does not establish physical implementation feasibility.
+//
+// Speed-up and slow-down use the same rate, so every move is symmetric: the
+// distance spent speeding up is mirrored when slowing down. Each tick the
+// planner only checks whether there is still room to mirror a faster step
+// (two additions and a comparison on the travelled distance). No division or
+// multiplication is needed anywhere; stopping-distance math was removed.
+// SERIAL_SETUP is retained for interface compatibility and ignored.
 module motion_planner #(
     parameter integer FRACTION_BITS = 8,
     parameter integer LIMIT_WIDTH = 16,
@@ -43,219 +46,131 @@ module motion_planner #(
     output reg                done
 );
     localparam integer POSITION_WIDTH = 13 + FRACTION_BITS;
-    // A sum of up to 2**LIMIT_WIDTH terms, each less than 2**LIMIT_WIDTH.
-    // The three-factor intermediate a*n*(n-1) needs three limit widths.
-    localparam integer STOP_WIDTH = 3 * LIMIT_WIDTH + 2;
     localparam integer DIST_WIDTH = (POSITION_WIDTH + 1 > LIMIT_WIDTH + 1)
         ? POSITION_WIDTH + 1 : LIMIT_WIDTH + 1;
 
-    reg signed [12+FRACTION_BITS:0] target_q;
+    // No multi-cycle setup; kept at zero for test compatibility.
+    wire preparing = 1'b0;
+
     reg direction_negative;
     reg [LIMIT_WIDTH-1:0] velocity_magnitude;
     reg [LIMIT_WIDTH-1:0] velocity_limit;
     reg [LIMIT_WIDTH-1:0] acceleration_limit;
+    reg [DIST_WIDTH-1:0] total_distance;
+    reg [DIST_WIDTH-1:0] traveled;
+    reg [DIST_WIDTH-1:0] turn_distance;
+    reg [1:0] phase;
+    localparam [1:0] ACCEL = 0, CRUISE = 1, DECEL = 2;
 
-    wire signed [DIST_WIDTH-1:0] position_wide =
-        {{(DIST_WIDTH-POSITION_WIDTH){reference_position[POSITION_WIDTH-1]}}, reference_position};
-    wire signed [DIST_WIDTH-1:0] target_wide =
-        {{(DIST_WIDTH-POSITION_WIDTH){target_q[POSITION_WIDTH-1]}}, target_q};
-    wire [DIST_WIDTH-1:0] speed_wide =
-        {{(DIST_WIDTH-LIMIT_WIDTH){1'b0}}, velocity_magnitude};
-    wire [DIST_WIDTH-1:0] acceleration_wide =
-        {{(DIST_WIDTH-LIMIT_WIDTH){1'b0}}, acceleration_limit};
-    wire [DIST_WIDTH-1:0] limit_wide =
-        {{(DIST_WIDTH-LIMIT_WIDTH){1'b0}}, velocity_limit};
-    wire [DIST_WIDTH-1:0] remaining = direction_negative
-        ? position_wide - target_wide : target_wide - position_wide;
-    wire [DIST_WIDTH-1:0] remaining_after_step = remaining - speed_wide;
+    // Pre-move distance left; the tick lands exactly when speed covers it.
+    wire [DIST_WIDTH-1:0] remaining = total_distance - traveled;
+    // Post-move values: every choice below is based on where this tick lands,
+    // matching move-then-update semantics (position moves first, then speed).
+    wire [DIST_WIDTH-1:0] advanced = traveled
+        + {{(DIST_WIDTH-LIMIT_WIDTH){1'b0}}, velocity_magnitude};
+    wire [DIST_WIDTH-1:0] remaining_after = total_distance - advanced;
     assign reference_velocity = direction_negative
         ? -$signed({1'b0, velocity_magnitude})
         :  $signed({1'b0, velocity_magnitude});
 
-    // Sum v, max(v-a,0), ... exactly. ceil(v/a) terms are nonzero.
-    // Wide products preserve all bits through the triple product. Guard zero divisors.
-    function [STOP_WIDTH-1:0] stopping_distance;
-        input [LIMIT_WIDTH-1:0] speed;
-        input [LIMIT_WIDTH-1:0] accel;
-        reg [LIMIT_WIDTH:0] numerator;
-        reg [STOP_WIDTH-1:0] count;
-        reg [STOP_WIDTH-1:0] speed_wide;
-        reg [STOP_WIDTH-1:0] accel_wide;
-        begin
-            if (accel == 0 || speed == 0) begin
-                stopping_distance = 0;
-            end else begin
-                numerator = {1'b0, speed} + {1'b0, accel} - 1'b1;
-                count = numerator / accel;
-                speed_wide = {{(STOP_WIDTH-LIMIT_WIDTH){1'b0}}, speed};
-                accel_wide = {{(STOP_WIDTH-LIMIT_WIDTH){1'b0}}, accel};
-                stopping_distance = count * speed_wide
-                    - ((accel_wide * count * (count - 1'b1)) >> 1);
-            end
-        end
-    endfunction
+    // Faster-step candidate, capped at the latched speed limit.
+    wire [LIMIT_WIDTH:0] sped_up = {1'b0, velocity_magnitude}
+        + {1'b0, acceleration_limit};
+    wire [LIMIT_WIDTH-1:0] faster =
+        sped_up > {1'b0, velocity_limit}
+            ? velocity_limit : sped_up[LIMIT_WIDTH-1:0];
 
-    // SERIAL_SETUP prepares for 3*LIMIT_WIDTH+1 clocks after acceptance;
-    // the first usable tick is on the following edge (3*LIMIT_WIDTH+2).
-    // for bounded shift/add arithmetic. No divider or multiplier is elaborated
-    // in this configuration. Ticks during preparation leave the reference still.
-    localparam integer SUM_WIDTH = 2*LIMIT_WIDTH+2;
-    reg [SUM_WIDTH-1:0] stopping_current;
-    wire [SUM_WIDTH-1:0] stopping_limit;
-    wire preparing;
-    generate if (SERIAL_SETUP != 0) begin : serial
-        localparam [2:0] IDLE=0, DIVIDE=1, MUL1=2, SETUP2=3, MUL2=4;
-        reg [2:0] state;
-        localparam integer COUNT_WIDTH = LIMIT_WIDTH < 2 ? 1 : $clog2(LIMIT_WIDTH+1);
-        reg [COUNT_WIDTH-1:0] bit_count;
-        reg [LIMIT_WIDTH-1:0] numerator;
-        reg [LIMIT_WIDTH-1:0] quotient;
-        reg [LIMIT_WIDTH:0] remainder;
-        reg [LIMIT_WIDTH-1:0] count;
-        reg [SUM_WIDTH-1:0] multiplicand;
-        reg [LIMIT_WIDTH-1:0] multiplier;
-        reg [SUM_WIDTH-1:0] product;
-        reg [SUM_WIDTH-1:0] result;
-        wire [LIMIT_WIDTH:0] shifted_remainder =
-            {remainder[LIMIT_WIDTH-1:0], numerator[LIMIT_WIDTH-1]};
-        wire quotient_bit = shifted_remainder >= {1'b0, acceleration_limit};
-        wire [LIMIT_WIDTH-1:0] next_quotient =
-            (quotient << 1) | quotient_bit;
-        wire [SUM_WIDTH-1:0] next_product = product +
-            (multiplier[0] ? multiplicand : {SUM_WIDTH{1'b0}});
-        assign preparing = state != IDLE;
-        assign stopping_limit = result;
-        always @(posedge clk) begin
-            if (!rst_n || !enable) begin
-                state <= IDLE;
-                bit_count <= 0;
-                numerator <= 0;
-                quotient <= 0;
-                remainder <= 0;
-                count <= 0;
-                multiplicand <= 0;
-                multiplier <= 0;
-                product <= 0;
-                result <= 0;
-            end else if (!busy && start && start_position != target_position &&
-                         max_velocity != 0 && acceleration != 0) begin
-                // ceil(v/a) = floor((v-1)/a)+1, with W-bit numerator.
-                numerator <= max_velocity - 1'b1;
-                quotient <= 0;
-                remainder <= 0;
-                bit_count <= LIMIT_WIDTH;
-                state <= DIVIDE;
-            end else case (state)
-                DIVIDE: begin
-                    numerator <= numerator << 1;
-                    quotient <= next_quotient;
-                    remainder <= quotient_bit ?
-                        shifted_remainder - {1'b0, acceleration_limit} : shifted_remainder;
-                    bit_count <= bit_count - 1;
-                    if (bit_count == 1) begin
-                        count <= next_quotient + 1'b1;
-                        multiplicand <= acceleration_limit;
-                        multiplier <= next_quotient;
-                        product <= 0;
-                        bit_count <= LIMIT_WIDTH;
-                        state <= MUL1;
-                    end
-                end
-                MUL1: begin
-                    product <= next_product;
-                    multiplicand <= multiplicand << 1;
-                    multiplier <= multiplier >> 1;
-                    bit_count <= bit_count - 1;
-                    if (bit_count == 1) state <= SETUP2;
-                end
-                SETUP2: begin
-                    // S(v) = n * (2*v - (n-1)*a) / 2. The product
-                    // is even, so division by two is an exact right shift.
-                    multiplicand <= ({{(SUM_WIDTH-LIMIT_WIDTH){1'b0}}, velocity_limit} << 1) - product;
-                    multiplier <= count;
-                    product <= 0;
-                    bit_count <= LIMIT_WIDTH;
-                    state <= MUL2;
-                end
-                MUL2: begin
-                    product <= next_product;
-                    multiplicand <= multiplicand << 1;
-                    multiplier <= multiplier >> 1;
-                    bit_count <= bit_count - 1;
-                    if (bit_count == 1) begin
-                        result <= next_product >> 1;
-                        state <= IDLE;
-                    end
-                end
-                default: state <= IDLE;
-            endcase
-        end
-    end else begin : combinational_setup
-        assign preparing = 1'b0;
-        assign stopping_limit = {SUM_WIDTH{1'b0}};
-    end endgenerate
+    // Room-to-mirror check: after taking the faster step, the mirrored
+    // slow-down must still fit. Only additions and comparisons.
+    wire [DIST_WIDTH:0] projected = advanced
+        + {{(DIST_WIDTH+1-LIMIT_WIDTH){1'b0}}, faster};
+    wire [DIST_WIDTH+1:0] doubled = {1'b0, projected} + {1'b0, projected};
+    wire room_for_faster = (projected <= {1'b0, total_distance})
+        && (doubled <= {{2{1'b0}}, total_distance});
 
-    reg [LIMIT_WIDTH:0] accelerated;
-    reg [LIMIT_WIDTH-1:0] candidate;
+    wire [DIST_WIDTH-1:0] accel_wide =
+        {{(DIST_WIDTH-LIMIT_WIDTH){1'b0}}, acceleration_limit};
+    wire [DIST_WIDTH-1:0] limit_wide =
+        {{(DIST_WIDTH-LIMIT_WIDTH){1'b0}}, velocity_limit};
+    wire final_step = (velocity_magnitude <= acceleration_limit)
+        && (remaining_after <= accel_wide) && (remaining_after <= limit_wide);
+
     reg [LIMIT_WIDTH-1:0] next_speed;
-    reg [SUM_WIDTH-1:0] next_stopping;
-    reg [SUM_WIDTH-1:0] candidate_stopping;
+    reg [DIST_WIDTH-1:0] next_turn;
+    reg [1:0] next_phase;
     always @* begin
-        accelerated = {1'b0, velocity_magnitude} + {1'b0, acceleration_limit};
-        candidate = accelerated > {1'b0, velocity_limit}
-            ? velocity_limit : accelerated[LIMIT_WIDTH-1:0];
-        if (SERIAL_SETUP != 0) begin
-            // Adding a full acceleration interval prepends candidate to the
-            // existing stopping sequence. A capped step uses cached S(vmax).
-            candidate_stopping = accelerated > {1'b0, velocity_limit}
-                ? stopping_limit : stopping_current + candidate;
-            if (candidate_stopping <= remaining_after_step) begin
-                next_speed = candidate;
-                next_stopping = candidate_stopping;
-            end else if (stopping_current <= remaining_after_step) begin
-                next_speed = velocity_magnitude;
-                next_stopping = stopping_current;
-            end else if (velocity_magnitude > acceleration_limit) begin
-                next_speed = velocity_magnitude - acceleration_limit;
-                next_stopping = stopping_current - velocity_magnitude;
+        next_speed = velocity_magnitude;
+        next_turn = turn_distance;
+        next_phase = phase;
+        if (phase == ACCEL) begin
+            if (velocity_magnitude == velocity_limit) begin
+                // Top speed reached: remember how far speeding up took.
+                next_turn = advanced;
+                next_phase = CRUISE;
+            end else if (room_for_faster) begin
+                next_speed = faster;
             end else begin
-                next_speed = 0;
-                next_stopping = 0;
+                // Past halfway: mirror the distance covered so far.
+                next_turn = advanced;
+                next_phase = DECEL;
             end
-        end else begin
-            candidate_stopping = 0;
-            next_stopping = 0;
-            // Exact legacy combinational profile, retained for standalone use.
-            if (stopping_distance(candidate, acceleration_limit) <= remaining_after_step)
-                next_speed = candidate;
-            else if (stopping_distance(velocity_magnitude, acceleration_limit)
-                     <= remaining_after_step)
-                next_speed = velocity_magnitude;
+        end
+        if (next_phase == CRUISE) begin
+            if (advanced >= total_distance - next_turn)
+                next_phase = DECEL;
+            else
+                next_speed = velocity_limit;
+        end
+        if (next_phase == DECEL) begin
+            if (final_step)
+                next_speed = remaining_after[LIMIT_WIDTH-1:0];
             else if (velocity_magnitude > acceleration_limit)
                 next_speed = velocity_magnitude - acceleration_limit;
-            else
-                next_speed = 0;
+            // Otherwise hold the low speed; the guards below land exactly.
         end
-
-        // At low speed, a fractional final step fits within the acceleration
-        // bound and lands exactly; this also handles moves shorter than a tick.
-        if (velocity_magnitude <= acceleration_limit &&
-            remaining_after_step <= acceleration_wide &&
-            remaining_after_step <= limit_wide) begin
-            next_speed = remaining_after_step[LIMIT_WIDTH-1:0];
-            next_stopping = remaining_after_step;
+        // Guards: always make progress, never step past the target.
+        // (Slices of remaining_after are exact here: either guard implies
+        // it fits in LIMIT_WIDTH bits.)
+        if (next_speed == {LIMIT_WIDTH{1'b0}} && remaining_after != 0) begin
+            next_speed = acceleration_limit;
+            if (next_speed > velocity_limit)
+                next_speed = velocity_limit;
+            if ({{(DIST_WIDTH-LIMIT_WIDTH){1'b0}}, next_speed} > remaining_after)
+                next_speed = remaining_after[LIMIT_WIDTH-1:0];
+        end else if ({{(DIST_WIDTH-LIMIT_WIDTH){1'b0}}, next_speed} > remaining_after) begin
+            next_speed = remaining_after[LIMIT_WIDTH-1:0];
         end
     end
+
+    wire [POSITION_WIDTH:0] position_ext =
+        {reference_position[POSITION_WIDTH-1], reference_position};
+    wire [POSITION_WIDTH:0] step_ext =
+        {{(POSITION_WIDTH+1-LIMIT_WIDTH){1'b0}}, velocity_magnitude};
+    wire [POSITION_WIDTH:0] stepped = direction_negative
+        ? position_ext - step_ext : position_ext + step_ext;
+
+    // Shifted like the reference: one integer step is 2**FRACTION_BITS units.
+    wire signed [POSITION_WIDTH:0] start_q =
+        {start_position[12], start_position, {FRACTION_BITS{1'b0}}};
+    wire signed [POSITION_WIDTH:0] goal_q =
+        {target_position[12], target_position, {FRACTION_BITS{1'b0}}};
+    // The command's own direction (not the registered one, which still
+    // holds the previous move while start is sampled).
+    wire start_negative = target_position < start_position;
+    wire [DIST_WIDTH-1:0] span = start_negative
+        ? $unsigned(start_q - goal_q) : $unsigned(goal_q - start_q);
 
     always @(posedge clk) begin
         if (!rst_n) begin
             reference_position <= 0;
-            target_q <= 0;
-            stopping_current <= 0;
             direction_negative <= 0;
             velocity_magnitude <= 0;
             velocity_limit <= 0;
             acceleration_limit <= 0;
+            total_distance <= 0;
+            traveled <= 0;
+            turn_distance <= 0;
+            phase <= ACCEL;
             busy <= 0;
             done <= 0;
         end else begin
@@ -263,16 +178,20 @@ module motion_planner #(
             if (!enable) begin
                 busy <= 0;
                 velocity_magnitude <= 0;
-                stopping_current <= 0;
+                traveled <= 0;
+                turn_distance <= 0;
+                phase <= ACCEL;
             end else if (!busy) begin
                 if (start) begin
                     reference_position <= {start_position, {FRACTION_BITS{1'b0}}};
-                    target_q <= {target_position, {FRACTION_BITS{1'b0}}};
-                    direction_negative <= target_position < start_position;
+                    direction_negative <= start_negative;
                     velocity_magnitude <= 0;
-                    stopping_current <= 0;
+                    traveled <= 0;
+                    turn_distance <= 0;
+                    phase <= ACCEL;
                     velocity_limit <= max_velocity;
                     acceleration_limit <= acceleration;
+                    total_distance <= span;
                     if (start_position == target_position ||
                         max_velocity == 0 || acceleration == 0) begin
                         busy <= 0;
@@ -281,19 +200,17 @@ module motion_planner #(
                         busy <= 1;
                     end
                 end
-            end else if (tick && !preparing) begin
-                if (direction_negative)
-                    reference_position <= position_wide - $signed(speed_wide);
-                else
-                    reference_position <= position_wide + $signed(speed_wide);
-                if (speed_wide == remaining) begin
+            end else if (tick) begin
+                reference_position <= stepped[POSITION_WIDTH-1:0];
+                traveled <= advanced;
+                if (velocity_magnitude == remaining) begin
                     velocity_magnitude <= 0;
-                    stopping_current <= 0;
                     busy <= 0;
                     done <= 1;
                 end else begin
                     velocity_magnitude <= next_speed;
-                    stopping_current <= next_stopping;
+                    turn_distance <= next_turn;
+                    phase <= next_phase;
                 end
             end
         end

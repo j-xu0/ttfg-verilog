@@ -43,7 +43,8 @@ The shared controller uses fixed Q16 arithmetic:
   fractional bits; speed limits are unsigned 20-bit values.
 - Acceleration: unsigned 13-bit raw steps/control-tick squared, 16 fractional bits.
 - Gains: two-bit codes 00, 01, 10, 11 select 1/8, 1/4, 1/2, 1. CONTROL[3:2]
-  selects Kp and CONTROL[1:0] selects Ki.
+  selects Kp. CONTROL[1:0] were Ki and are now reserved/ignored in the P-only
+  integrated engine.
 
 The detailed proposal's 1 kHz loop and acceleration endpoints are used. Intermediate
 lookup entries are explicit implementation choices; the proposals omit them.
@@ -77,9 +78,14 @@ enable on the next edge and independently gate aborts. Divisor 1 enables every c
 The planner latches positions/limits on `start` while idle; commands while busy
 are ignored. Only accepted ticks advance the reference. Each tick advances position
 by the previous reference velocity, then selects the next velocity. The first tick
-accelerates without displacement. Exact discrete stopping distance determines
-acceleration, cruise and braking. Final fractional displacement lands exactly on
-the target; the landing edge sets velocity zero and emits one-clock `done`.
+accelerates without displacement. Speed-up and slow-down use the same rate, so
+every move is symmetric: the distance spent speeding up is mirrored when slowing
+down. Each tick only checks whether there is still room to mirror a faster step
+(two additions and a comparison on the travelled distance). No division or
+multiplication is used anywhere; there is no setup delay and motion can begin on
+the first tick. A short final step lands exactly on the target; the landing edge
+sets velocity zero and emits one-clock `done`. `SERIAL_SETUP` is retained as an
+ignored compatibility parameter; all configurations use the same mirror rule.
 
 The integrated `shared_motion_controller` uses a generated 64-entry lookup table
 for the exact discrete stopping sums of the supported velocity/acceleration
@@ -97,10 +103,20 @@ Planner inputs remain stable while busy because SPI rejects writes. This permits
 `STABLE_CONFIG=1` to omit redundant target/profile registers. Disable/reset
 cancels an unfinished calculation; the next command starts from measured position.
 
-The old `motion_planner.v`, `compact_motion_planner.v` and `pi_controller.v` remain
+The old `motion_planner.v` (now a mirror-rule reference with no stopping-distance
+arithmetic), `compact_motion_planner.v` and `pi_controller.v` remain
 as independently tested references, excluded from the physical source list.
 No speed, acceleration,
 gain, position-range, or Q16 fractional-resolution setting is removed.
+
+## Feedback arithmetic
+
+> **Current integrated engine (Q11, 1x1 area revision).** The physical design is
+> P-only: `reference_position[23:0]` is Q11, error is
+> `(reference[23:11] - measured) << 11`, Kp selects 1/8…1, and the command is
+> `feedforward + Kp*error` clamped to the profile velocity limit. The integrator,
+> Ki register and anti-windup path were removed. The Q16 PI description below is
+> retained for the standalone `pi_controller.v` reference and its unit tests.
 
 ## PI arithmetic
 

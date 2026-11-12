@@ -34,8 +34,8 @@ module tt_um_j_xu0_stepper (
   wire launch = run_allowed && command_pending && !active;
   wire control_ce, planner_busy, planner_done, planner_calculating, pi_calculating;
   wire engine_calculating;
-  wire signed [28:0] reference_position;
-  wire signed [20:0] reference_velocity, velocity_command;
+  wire signed [23:0] reference_position;
+  wire signed [13:0] reference_velocity, velocity_command;
   // An idle planner for an armed move has completed at the latched TARGET.
   // Workspace outputs are deliberately invalid during serial calculations.
   wire target_reached = active && !planner_busy && !planner_calculating
@@ -121,14 +121,15 @@ module tt_um_j_xu0_stepper (
       .clk(clk), .rst_n(rst_n), .enable(run_allowed), .control_ce(control_ce)
   );
   wire pi_saturated, rate_limited;
-  // One engine samples the completed reference and feedback, evaluates PI,
-  // then advances the planner using the same scratch register and bit ALU.
+  // The planner advances the reference bit-serially; a dedicated single-cycle
+  // P stage samples the completed reference and feedback and publishes the
+  // clamped command before planner work starts.
   // Busy SPI writes are rejected, keeping configuration stable during work.
   shared_motion_controller #(.STABLE_CONFIG(1)) controller (
       .clk(clk), .rst_n(rst_n), .tick(control_ce), .enable(run_allowed),
       .control_enable(active), .clear_control(launch || target_reached),
       .start(launch), .start_position(position), .target_position(target),
-      .plan_code(plan), .kp_select(control[3:2]), .ki_select(control[1:0]),
+      .plan_code(plan), .kp_select(control[3:2]),
       .reference_position(reference_position), .reference_velocity(reference_velocity),
       .planner_busy(planner_busy), .planner_done(planner_done),
       .planner_calculating(planner_calculating), .pi_calculating(pi_calculating),
@@ -138,7 +139,7 @@ module tt_um_j_xu0_stepper (
   wire step, dir, driver_enable;
   step_dir_generator pulses (
       .clk(clk), .rst_n(rst_n), .enable(run_allowed && active),
-      .fault(fault), .velocity_command(target_reached ? 21'sd0 : velocity_command),
+      .fault(fault), .velocity_command(target_reached ? 14'sd0 : velocity_command),
       .step(step), .dir(dir), .driver_enable(driver_enable), .rate_limited(rate_limited)
   );
   assign uo_out = {1'b0, (ena && rst_n && miso),
@@ -146,7 +147,7 @@ module tt_um_j_xu0_stepper (
       (ena && rst_n && busy), driver_enable, (run_allowed && dir), step};
   assign uio_out = 8'h00;
   assign uio_oe = 8'h00;
-  wire _unused = &{ui_in[7:6], uio_in, write_pulse, reject_pulse, planner_done,
+  wire _unused = &{ui_in[7:6], uio_in, write_pulse, reject_pulse, planner_done, control[1:0],
                    pi_saturated, rate_limited, pi_calculating, engine_calculating, 1'b0};
 endmodule
 `default_nettype wire
