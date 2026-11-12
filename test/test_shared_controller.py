@@ -12,8 +12,8 @@ from cocotb.clock import Clock
 from cocotb.triggers import Timer
 import pytest
 
-VELOCITIES = (6554, 13107, 32768, 65536, 131072, 262144, 458752, 655360)
-ACCELS = (33, 66, 131, 328, 655, 1311, 3277, 6554)
+VELOCITIES = (205, 410, 1024, 2048, 4096, 5120, 6144, 8191)
+ACCELS = (1, 2, 4, 10, 20, 41, 102, 205)
 LATENCY_LIMIT = 2000
 
 
@@ -28,21 +28,31 @@ def clamp(value, limit):
 
 @lru_cache(maxsize=32768)
 def stopping_distance(speed, acceleration):
-    return sum(range(speed, 0, -acceleration))
+    # Integer-only brake matches RTL: truncate each Q11 speed to whole
+    # steps (speed>>11) before summing; sub-step speeds contribute 0.
+    # At most a few steps early/late for tiny speeds; accepted for area.
+    s = sum(sv >> 11 for sv in range(speed, 0, -acceleration))
+    return s if s <= 8191 else 16383
 
 
 def advance(position, velocity, target, vmax, acceleration):
-    position += velocity
+    # Q13.8 position (scale 256), Q11 velocity (scale 2048), integer brake.
+    # pos += v>>3 (floor, matches Verilog >>>3).
+    position += velocity // 8
+    pos_int, goal_int = position // 256, target // 256
+    # Integer-only finish (spec 1-step tolerance): frac error <1 step accepted.
+    if pos_int == goal_int:
+        return position, 0, 0
     if position == target:
         return position, 0, 0
-    remaining, speed = abs(target-position), abs(velocity)
+    remaining, speed = abs(goal_int - pos_int), abs(velocity)
     next_speed = max(speed-acceleration, 0)
     for candidate in (min(speed+acceleration, vmax), speed, next_speed):
         if stopping_distance(candidate, acceleration) <= remaining:
             next_speed = candidate
             break
-    if speed <= acceleration and remaining <= min(acceleration, vmax):
-        next_speed = remaining
+    if speed <= acceleration and remaining == 0:
+        next_speed = 0
     return position, next_speed if target > position else -next_speed, 1
 
 
@@ -51,7 +61,8 @@ class PI:
         self.integral = self.command = self.saturated = 0
 
     def update(self, position, measured, velocity, vmax, kp, ki):
-        error = position - measured*65536
+        # Integer-only error: (pos_int - measured) << 11 (Q11).
+        error = (position // 256 - measured) * 2048
         total = velocity + error // (8, 4, 2, 1)[kp] + self.integral
         self.command = clamp(total, vmax)
         self.saturated = int(total != self.command)
@@ -104,8 +115,8 @@ class Harness:
                  start=1, tick=0, clear_control=0, control_enable=1, enable=1)
         await clocks()
         self.put(start=0)
-        self.ref = (origin*65536, 0, int(origin != goal))
-        self.goal, self.code, self.pi = goal*65536, code, PI()
+        self.ref = (origin*256, 0, int(origin != goal))
+        self.goal, self.code, self.pi = goal*256, code, PI()
         assert self.reference_output() == self.ref
         assert self.command_output() == (0, 0)
         assert int(self.dut.planner_done.value) == int(origin == goal)
@@ -130,7 +141,7 @@ class Harness:
             self.put(start_position=4095 if measured != 4095 else -4096)
             if not self.stable:
                 self.put(kp_select=3-kp, ki_select=3-ki,
-                         target_position=~(self.goal//65536), plan_code=self.code ^ 63)
+                         target_position=~(self.goal//256), plan_code=self.code ^ 63)
         elapsed = 1
         while int(self.dut.calculating.value):
             if int(self.dut.pi_calculating.value):
@@ -176,12 +187,13 @@ async def shared_numerical_contract(dut):
         for index in range(20000):
             # Integer feedback around the reference exercises fractional errors,
             # saturation, anti-windup and sign changes without observing RTL internals.
-            measured = clamp((h.ref[0] // 65536) + rng.choice((-8, -1, 0, 0, 1, 7)), 4095)
+            measured = clamp((h.ref[0] // 256) + rng.choice((-8, -1, 0, 0, 1, 7)), 4095)
             measured = max(-4096, measured)
             kp, ki = (index // 4 + code) % 4, (index + code) % 4
             await h.tick(measured, kp, ki)
             if not h.ref[2]:
-                assert h.ref == (target*65536, 0, 0)
+                # Integer-only finish: frac <1 step error accepted per numeric-spec.
+                assert h.ref[0] // 256 == target and h.ref[1] == 0, (h.ref, target)
                 # PI-only disturbance recovery must safely reuse scratch storage
                 # after planner completion, retaining the completed reference.
                 for offset in (-4096, 4095, target, target):
@@ -265,7 +277,7 @@ async def shared_cancellation_contract(dut):
     h.put(clear_control=0)
     await clocks(LATENCY_LIMIT)
     assert not int(dut.calculating.value)
-    assert h.reference_output() == (3*65536, 0, 0)
+    assert h.reference_output() == (3*256, 0, 0)
     assert h.command_output() == (0, 0)
     await h.tick(2, 3, 3)
     # Sweep every edge across the initial serial error subtraction and PI

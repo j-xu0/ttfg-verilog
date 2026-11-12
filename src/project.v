@@ -34,8 +34,8 @@ module tt_um_j_xu0_stepper (
   wire launch = run_allowed && command_pending && !active;
   wire control_ce, planner_busy, planner_done, planner_calculating, pi_calculating;
   wire engine_calculating;
-  wire signed [20:0] reference_position;
-  wire signed [12:0] reference_velocity, velocity_command;
+  wire signed [21:0] reference_position;
+  wire signed [13:0] reference_velocity, velocity_command;
   // An idle planner for an armed move has completed at the latched TARGET.
   // Workspace outputs are deliberately invalid during serial calculations.
   wire target_reached = active && !planner_busy && !planner_calculating
@@ -138,7 +138,7 @@ module tt_um_j_xu0_stepper (
   wire step, dir, driver_enable;
   step_dir_generator pulses (
       .clk(clk), .rst_n(rst_n), .enable(run_allowed && active),
-      .fault(fault), .velocity_command(target_reached ? 13'sd0 : velocity_command),
+      .fault(fault), .velocity_command(target_reached ? 14'sd0 : velocity_command),
       .step(step), .dir(dir), .driver_enable(driver_enable), .rate_limited(rate_limited)
   );
   assign uo_out = {1'b0, (ena && rst_n && miso),

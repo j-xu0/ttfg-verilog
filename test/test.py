@@ -404,3 +404,35 @@ async def shared_engine_abort_phases(dut):
             assert int(dut.uo_out.value) & 0x1F == 0
             set_input(dut, 5, 0)
             await Timer(1000, unit="ns")
+
+
+@cocotb.test()
+async def spi_init_short_move(dut):
+    """Directed waveform: SPI setup writes, then one tiny accel/decel move.
+
+    CONTROL and PLAN are written while motion is disabled, then TARGET queues
+    a 64-step move. Enabling starts it. Sixty-four steps is far below the
+    profile's accel+decel distance, so the planner never reaches the velocity
+    limit and there is no cruise phase: the STEP spacing falls then rises.
+    """
+    await initialize(dut)
+    motor = MotorModel(dut)
+    cocotb.start_soon(motor.run())
+
+    await spi_frame(dut, 0xA004)  # CONTROL: Kp = 1/4, Ki = 1/8
+    await spi_frame(dut, 0xC03F)  # PLAN: 10000 steps/s, ~100000 steps/s^2
+    await spi_frame(dut, 0x8040)  # TARGET: +64 steps, queued while disabled
+    await Timer(100, unit="us")
+    assert int(dut.uo_out.value) & 0x1F == 0, "disabled setup drove pins"
+
+    set_input(dut, 5, 1)  # motion enable launches the queued TARGET
+    await wait_settled(dut, timeout_us=100000)
+    assert motor.position == 64
+    assert motor.steps == 64, f"expected one STEP per step, saw {motor.steps}"
+    assert await spi_frame(dut, 0) == 0x2000  # at target, not busy/fault
+
+    gaps = [b - a for a, b in zip(motor.rises, motor.rises[1:])]
+    assert len(gaps) >= 4, f"too few STEP pulses to show a profile: {gaps}"
+    middle = min(range(len(gaps)), key=gaps.__getitem__)
+    assert 0 < middle < len(gaps) - 1, f"no accel/decel split: {gaps}"
+    assert gaps[0] > gaps[middle] and gaps[-1] > gaps[middle], gaps
