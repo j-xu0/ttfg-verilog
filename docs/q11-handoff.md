@@ -231,3 +231,26 @@ Implemented, tested locally, measured with the same flow (stock lib, the six
 * A hand-written parallel planner with dedicated adders measures 21.5 k
   standalone versus 21.8 k for the bit-serial planner: un-serializing buys
   nothing. The 1-bit adder plus 1-bit muxes are at the frontier.
+
+### CI result for the above (commit 8f7189c, run 43302465166)
+
+```
+Core area:            51,966.970 um^2
+Movable instances:    60,966 -> 48,679 um^2   (-20.2%)
+Pin density adjust:    8,053 ->  6,818 um^2
+Utilization:         120.871 -> 110.027 %
+Effective util:        1.018 -> 0.937
+Instances:             2,531 -> 2,291
+```
+
+Still `GPL-0301`, but 10.9 utilization points recovered. The 90 % target means
+`(movable + pin-adjust + fixed 1,528) <= 46,770`, i.e. ~8.7 k um² (~16 %) less
+movable area. Note the CI/local factor is now **1.02** (48,679 vs 47,614), not
+the 1.19 assumed earlier, so local deltas translate almost 1:1 and the earlier
+"open loop = 80 %" estimate was pessimistic: deleting the PI (−10.4 k measured
+on the previous revision) would now land ~38 k raw ≈ **86 %**.
+
+Remaining feature-preserving budget is small: `work`/PI folding ≈ −1 k,
+narrow PI accumulator ≈ −0.8 k (measured −0.17 k for the tap part alone). The
+only measured ways below 90 % are the descopes: PI deleted ≈ 86 %, or
+fix-profiles (−3.3 k) + P-only (−1.6 k) + the 2 k of cleanups ≈ 39 k raw ≈ 92 %.
