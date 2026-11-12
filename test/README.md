@@ -1,6 +1,33 @@
 # Verification
 
-Install Icarus Verilog and make, then run from the repository root:
+For a self-contained RTL test environment, build and run the container from the
+repository root. Python 3.11, Icarus Verilog, make, and the pinned Python test
+dependencies are included; nothing needs to be installed on the host besides
+Docker:
+
+```sh
+docker build -f test/Dockerfile -t ttfg-tests .
+docker run --rm -it ttfg-tests
+```
+
+Pass suite names after the image name for a shorter run:
+
+```sh
+docker run --rm -it ttfg-tests spi encoder timebase
+```
+
+The `-it` enables colored badges and live progress. Omit it in CI. Tests run
+as an unprivileged user inside the image, without writing caches to the host.
+Rebuild after source changes. Logs and waveforms stay inside the container;
+to keep them, name the container and copy results out before removing it:
+
+```sh
+docker run --name ttfg-test-results ttfg-tests spi encoder timebase
+docker cp ttfg-test-results:/work/test/output ./test-output
+docker rm ttfg-test-results
+```
+
+For a native setup, install Icarus Verilog and make, then run from the repository root:
 
 ```sh
 python3 -m venv .venv

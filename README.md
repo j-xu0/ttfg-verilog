@@ -30,6 +30,13 @@ that budget: controlled GF180 synthesis measures 58,175 um² versus the original
 [the optimization results](docs/area-optimization.md) and
 [the hardening history](docs/hardening.md).
 
+Run in a container with Python and the simulator included:
+
+```sh
+docker build -f test/Dockerfile -t ttfg-tests .
+docker run --rm -it ttfg-tests
+```
+
 With Python, Icarus Verilog, and make installed, run from the repository root:
 
 ```sh
