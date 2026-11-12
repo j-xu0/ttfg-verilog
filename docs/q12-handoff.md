@@ -234,9 +234,12 @@ integral clamp, anti-windup freeze). The prototypes are checked in under
 | implementation | area | cells |
 |---|---:|---:|
 | current serial PI (marginal) | 15,981 | — |
-| dedicated parallel, full features | **16,767** | 761 |
-| dedicated parallel, P-only (no integrator/anti-windup) | **7,999** | 392 |
+| dedicated parallel, full features | **16,429** | 745 |
+| dedicated parallel, P-only (no integrator/anti-windup) | **8,311** | 423 |
 | calibration: one 14-bit add + clamp | 4,645 | 198 |
+
+(Prototype numbers move ±3 % with mapping noise: the same full PI measured
+16,429 and 16,767 in two runs. The conclusion is insensitive to that.)
 
 So sharing the ALU is *not* the cost — the gain shifts, clamps, comparisons and
 the 14-bit datapath are. **A full PI costs ~16 k in this PDK no matter how it is
@@ -250,7 +253,7 @@ implemented**, which puts a hard floor under the whole design:
 | P-only on the shared engine (measured) | 46.6 k | 107.4 % |
 | P-only on the shared engine + fixed profile | 43.8 k | 101.2 % |
 | open loop (PI deleted, measured) | 31.1 k | **72.8 %** |
-| planner serial (12.9 k) + **dedicated P-only PI** (8.0 k) | ~39.9 k | **~92.5 %** |
+| planner serial (12.9 k) + **dedicated P-only PI** (8.3 k) | ~39.9 k | **~92.5 %** |
 | that + fixed profile (−2.1 k) | ~37.8 k | ~88 % |
 
 Conclusion: **full PI cannot fit 1x1 in this PDK.** The only closed-loop
@@ -270,7 +273,7 @@ worth only 2.1 k now — the big LUT win is already banked.
    update `test/test_shared_controller.py` (the oracle drops the integrator; the
    96-offset cancellation sweep becomes trivial because there is no in-place
    rotation), and note in `docs/implementation.md` that anti-windup is gone.
-   `experiments/tb_engine_sweep.v` is an Icarus bench that prints position /
+   `experiments/bench/tb_engine_sweep.v` is an Icarus bench that prints position /
    speed / brake-sum per tick for `+goal=<steps> +code=<profile>`; use it to
    diff the RTL against the Python oracle when you change the algorithm.
 2. **If full PI is non-negotiable**, the only way to the 100 % line is ~4.3 k out

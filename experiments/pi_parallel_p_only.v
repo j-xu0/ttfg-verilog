@@ -2,7 +2,7 @@
 // (integer error, 4 kp/ki codes, feedforward, command clamp+saturated,
 // integral clamp and anti-windup freeze). Not integrated.
 `default_nettype none
-module pi_p_only (
+module pi_parallel_p_only (
     input wire clk, rst_n, enable, clear, accept,
     input wire signed [24:0] reference_position,
     input wire signed [12:0] measured,
