@@ -45,11 +45,14 @@ class Reporter:
         self.interactive = stream.isatty() and not os.environ.get('CI')
         self.color = self.interactive and 'NO_COLOR' not in os.environ
 
-    def line(self, status, message, live=False):
+    def style(self, text, status):
         colors = {'RUN': '33', 'PASS': '32', 'FAIL': '31', 'SKIP': '33'}
-        badge = f' {status:<4} '
         if self.color and status in colors:
-            badge = f'\033[1;{colors[status]}m{badge}\033[0m'
+            return f'\033[1;{colors[status]}m{text}\033[0m'
+        return text
+
+    def line(self, status, message, live=False):
+        badge = self.style(f' {status:<4} ', status)
         prefix = '\r\033[2K' if self.interactive else ''
         print(prefix + badge + ' ' + message, file=self.stream,
               end='' if live else '\n', flush=True)
@@ -106,29 +109,48 @@ def run_suite(name, command, report, log, reporter, index, total, cwd=ROOT):
     return result
 
 
-def print_summary(results, seconds, reporter):
+def print_summary(results, seconds, reporter, verbose=False):
+    if verbose:
+        for result in results:
+            if result.status == 'FAIL':
+                print(f'\n── {result.name} diagnostics ──', file=reporter.stream)
+                lines = result.log.read_text(errors='replace').splitlines()
+                if len(lines) > 60:
+                    print('(last 60 log lines)', file=reporter.stream)
+                print('\n'.join(lines[-60:]), file=reporter.stream)
+
+    # Always finish with the compact report, even after verbose diagnostics.
+    print('\nRegression results\n' + '─' * 68, file=reporter.stream)
     for result in results:
+        counts = ', '.join(f'{count} {label}' for count, label in
+                           ((result.passed, 'passed'), (result.failed, 'failed'),
+                            (result.skipped, 'skipped')) if count)
+        reporter.line(result.status,
+                      f'{result.name:<21} {counts or "no results":<28} '
+                      f'{result.seconds:>6.1f}s')
         if result.status == 'FAIL':
-            print(f'\n── {result.name} ──', file=reporter.stream)
-            if result.detail:
-                print(result.detail, file=reporter.stream)
-            # Keep terminal output bounded; full compiler/simulator traces stay on disk.
-            lines = result.log.read_text(errors='replace').splitlines()
-            if len(lines) > 60:
-                print('(last 60 log lines)', file=reporter.stream)
-            print('\n'.join(lines[-60:]), file=reporter.stream)
-            print(f'Full log: {result.log}', file=reporter.stream)
+            if result.detail and not result.failed:
+                print(f'       {result.detail}', file=reporter.stream)
+            print(f'       Log: {result.log}', file=reporter.stream)
+
+    def counts_line(label, failed, passed, skipped, total):
+        values = [reporter.style(f'{failed} failed', 'FAIL') if failed else '0 failed',
+                  reporter.style(f'{passed} passed', 'PASS') if passed else '0 passed',
+                  reporter.style(f'{skipped} skipped', 'SKIP') if skipped else '0 skipped']
+        print(f'{label:<13}' + ', '.join(values) + f', {total} total',
+              file=reporter.stream)
+
     failed_suites = sum(r.status == 'FAIL' for r in results)
-    passed_suites = sum(r.status == 'PASS' for r in results)
-    skipped_suites = sum(r.status == 'SKIP' for r in results)
-    print(f'\nTest suites: {failed_suites} failed, {passed_suites} passed, '
-          f'{skipped_suites} skipped, {len(results)} total', file=reporter.stream)
-    print(f'Tests:       {sum(r.failed for r in results)} failed, '
-          f'{sum(r.passed for r in results)} passed, '
-          f'{sum(r.skipped for r in results)} skipped, '
-          f'{sum(r.passed + r.failed + r.skipped for r in results)} total',
-          file=reporter.stream)
-    print(f'Time:        {seconds:.1f}s', file=reporter.stream)
+    print('─' * 68, file=reporter.stream)
+    counts_line('Test suites:', failed_suites,
+                sum(r.status == 'PASS' for r in results),
+                sum(r.status == 'SKIP' for r in results), len(results))
+    passed, failed, skipped = (sum(getattr(r, field) for r in results)
+                               for field in ('passed', 'failed', 'skipped'))
+    counts_line('Tests:', failed, passed, skipped, passed + failed + skipped)
+    minutes, remainder = divmod(round(seconds), 60)
+    duration = f'{minutes}m {remainder:02d}s' if minutes else f'{seconds:.1f}s'
+    print(f'Time:        {duration}', file=reporter.stream)
     return 1 if failed_suites else 0
 
 
@@ -136,6 +158,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('suites', nargs='*', metavar='SUITE',
                         help='suite names (default: all); use integration for the top-level tests')
+    parser.add_argument('--verbose', action='store_true',
+                        help='show failed log tails before the final report')
     parser.add_argument('--gates', action='store_true', help='run gate-level integration only')
     parser.add_argument('--log-dir', type=Path, default=ROOT / 'test' / 'output' / 'runner')
     args = parser.parse_args()
@@ -167,9 +191,9 @@ def main():
                                      reporter, index, len(names)))
     except KeyboardInterrupt:
         print('\nInterrupted; the active suite did not finish.', flush=True)
-        print_summary(results, time.monotonic() - start, reporter)
+        print_summary(results, time.monotonic() - start, reporter, args.verbose)
         return 130
-    code = print_summary(results, time.monotonic() - start, reporter)
+    code = print_summary(results, time.monotonic() - start, reporter, args.verbose)
     print(f'Logs:        {logs}\n')
     return code
 

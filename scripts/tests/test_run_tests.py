@@ -63,7 +63,9 @@ class RunnerTests(unittest.TestCase):
         result = self.write_report('<testsuite><testcase><failure message="bad RTL"/></testcase></testsuite>')
         self.assertEqual((result.status, result.failed), ('FAIL', 1))
         self.assertEqual(runner.print_summary([result], 1, self.reporter), 1)
-        self.assertIn('simulator diagnostics', self.stream.getvalue())
+        self.assertNotIn('simulator diagnostics', self.stream.getvalue())
+        self.assertIn('Regression results', self.stream.getvalue())
+        self.assertIn('1 failed', self.stream.getvalue())
         self.assertIn(str(self.log), self.stream.getvalue())
 
     def test_nonzero_exit_overrides_passing_xml(self):
@@ -96,10 +98,12 @@ class RunnerTests(unittest.TestCase):
 
     def test_failure_log_tail_bounded(self):
         result = self.run_child('print("\\n".join(str(i) for i in range(100)))')
-        runner.print_summary([result], 1, self.reporter)
+        runner.print_summary([result], 1, self.reporter, verbose=True)
         self.assertIn('last 60 log lines', self.stream.getvalue())
         self.assertNotIn('\n39\n', self.stream.getvalue())
         self.assertIn('\n99\n', self.stream.getvalue())
+        self.assertLess(self.stream.getvalue().index('\n99\n'),
+                        self.stream.getvalue().index('Regression results'))
 
 
 if __name__ == '__main__':

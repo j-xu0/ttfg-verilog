@@ -39,8 +39,9 @@ python scripts/run_tests.py
 The runner shows a live elapsed-time line in a terminal, a PASS/FAIL result for
 each suite, and a final count and duration. Redirected output and CI use plain,
 append-only lines; set `NO_COLOR=1` to disable terminal colors. Successful
-compiler/simulator output is saved under `test/output/runner/`; failures show
-the last 60 log lines with the full log path. All selected suites run even if
+compiler/simulator output is saved under `test/output/runner/`. The final report
+shows every suite with its counts, timing, and log path for failures. Add
+`--verbose` to print the last 60 lines of failed logs before the compact report. All selected suites run even if
 an earlier suite fails, and any failed command, missing/invalid report, or XML
 failure/error makes the runner exit nonzero. Ctrl-C stops the active suite and
 exits with status 130.
