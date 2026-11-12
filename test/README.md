@@ -6,9 +6,26 @@ Install Icarus Verilog and make, then run from the repository root:
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r test/requirements.txt
-python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py test/test_compact_planner.py test/test_pi.py test/test_step_dir.py test/test_shared_controller.py -q
-make -C test -B
+python scripts/run_tests.py
 ```
+
+The runner shows a live elapsed-time line in a terminal, a PASS/FAIL result for
+each suite, and a final count and duration. Redirected output and CI use plain,
+append-only lines; set `NO_COLOR=1` to disable terminal colors. Successful
+compiler/simulator output is saved under `test/output/runner/`; failures show
+the last 60 log lines with the full log path. All selected suites run even if
+an earlier suite fails, and any failed command, missing/invalid report, or XML
+failure/error makes the runner exit nonzero. Ctrl-C stops the active suite and
+exits with status 130.
+
+Run selected suites with `python scripts/run_tests.py spi encoder`, or use
+`python scripts/run_tests.py integration` for top-level tests only. Use
+`--log-dir /path/to/logs` to choose a log directory. The final test count combines
+pytest cases (including parameterized cases) for module suites with cocotb cases
+for integration; it does not count assertions inside a case. Unit JUnit reports
+are stored alongside their logs; integration keeps `test/results.xml` and
+`test/tb.fst`. The original pytest and make commands remain available for raw
+simulator output.
 
 The pytest runners compile each standalone module and run cocotb assertions.
 Each suite contains many directed cases:
@@ -54,7 +71,7 @@ flow. Place its powered netlist at `test/gate_level_netlist.v` and point
 `PDK_ROOT` at a PDK installation containing the `gf180mcuD` directory:
 
 ```sh
-make -C test -B GATES=yes
+python scripts/run_tests.py --gates
 ```
 
 The hierarchy-dependent wiring, serial-sampling and phase-abort tests are skipped with `GATES=yes`;
