@@ -324,7 +324,13 @@ async def nco_old_algorithm_equivalence(dut):
         dut.rst_n.value = 1
         dut.enable.value = 1
         dut.fault.value = 0
-        for _ in range(10000):
+        # Q11's largest positive command is just below four steps/tick.
+        # At 40 MHz its first pulse needs more than 10000 clocks.
+        bounded = min(velocity, 2048 * p["MAX_STEP_HZ"] // p["CONTROL_HZ"])
+        abort_patience = (2 * p["CLOCK_HZ"] * 2048 // (bounded * p["CONTROL_HZ"])
+                          + sum(p[name] for name in ("ENABLE_SETUP_CYCLES", "DIR_SETUP_CYCLES",
+                                                    "STEP_HIGH_CYCLES", "STEP_LOW_CYCLES")) + 10)
+        for _ in range(abort_patience):
             model.edge(velocity, rst_n, enable, fault)
             await cycle(dut)
             assert outputs() == model.outputs(velocity, rst_n, enable, fault)
