@@ -25,9 +25,22 @@ this is **−4,895.3 µm² (−10.3 %)**.
 | `quadrature_decoder` | 2,794.5 |
 | `control_timebase` | 1,870.3 |
 
-Using the Q12 CI/local relation (`total ≈ 1.1656·local + 1,527.9`) gives
-**≈98.8 % utilisation**, i.e. under the GPL limit but not at the 90 % headroom
-target. The CI number on this commit is the authority.
+CI run 43310580360 on commit `5420187` reports:
+
+```
+Core area:                        51966.970 um^2
+Movable instances area:           43309.101 um^2
+Pin density area adjust:           5867.302 um^2
+Movable instances area (GPL-0018): 49176.403 um^2
+Utilization (GPL-0018):                97.497 %   under 100 %
+```
+
+The GPL limit is clear, but **detailed placement still fails** with
+`DPL-0036` on 42 repair-design instances in `RepairDesignPostGPL`. Changing
+`PL_TARGET_DENSITY_PCT` from 60 to 80 and then 40 did not change the movable
+area (43,309.101 um² every time) or the failure, so this is a real density
+problem, not a placement-target setting. The 90 % headroom target exists for
+exactly this reason.
 
 ## 2. The Q12 planner number was not synthesizable
 
@@ -83,16 +96,25 @@ The remaining ~4 k cannot come from the P stage alone: it is already about as
 small as a correct 16-bit P datapath gets, and moving its clamp into the step
 generator measured *worse*. The measured next steps, in order:
 
-1. **Fixed velocity/acceleration profile.** Replacing the two 8-entry `plan_lut`
-   functions with constants measures **−1.45 k** on the current tree (top
-   ≈41.2 k, ≈94 %). This removes PLAN profile selection, a visible spec change.
-2. **Numeric descope** as in `q12-handoff.md` §8.3: halve the velocity ceiling,
-   dropping one bit from `speed`/`vmax`/command/position integer math. Estimated
-   1–1.5 k. Also a spec change.
-3. **Non-engine blocks** (SPI 6.8 k, step generator 6.8 k, encoder 2.8 k,
-   timebase 1.9 k). The safe, measured wins here are only hundreds of µm²; the
-   SPI frame staging and step-generator phase accumulator are the only large
-   candidates left and both change a documented contract.
+1. **Fix the velocity table to `vmax = 8191`.** This is the single large
+   measured saving: current tree **40,082.2 µm²** (top) versus 42,718.6. It keeps
+   all eight acceleration codes and `PLAN[2:0]` becomes reserved. Estimated CI
+   total ≈47.7 k (≈92 %), probably enough for detailed placement. This is a
+   visible spec change (one velocity instead of eight).
+2. **Fix both profile tables** (`vmax = 8191`, `accel = 205`): **39,728.7 µm²**
+   top, estimated ≈91 %. Removes all PLAN profile selection.
+3. **Numeric descope** as in `q12-handoff.md` §8.3: halve the velocity ceiling so
+   `vmax`/`speed`/command fit 12 bits. This keeps all 8×8 profile codes but
+   changes the delivered speed table (max 2000 steps/s). Not yet measured on
+   this tree; expected to be comparable to option 1 plus a smaller P stage.
+4. **Non-engine blocks** (SPI 6.8 k, step generator 6.8 k, encoder 2.8 k,
+   timebase 1.9 k). Safe measured wins are only hundreds of µm²; the SPI frame
+   staging and step-generator phase accumulator are the only large candidates
+   left and both change a documented contract.
+
+The current branch deliberately keeps all 64 profiles and leaves the spec
+intact, so the CI GDS job stops at DPL. Pick one of the options above before
+expecting a green 1x1 GDS run.
 
 Do not retry the Q12 "planner-only" ablation, a parallel full PI, or a serial
 P-only inside the shared engine: the serial P-only variant measured 26,750.7 for
