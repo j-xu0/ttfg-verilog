@@ -11,17 +11,20 @@ def render():
     lines += ['    endcase end', 'endfunction', 'function [10:0] profile_acceleration;',
               '    input [2:0] code;', '    begin case (code)']
     lines += [f"        3'd{i}: profile_acceleration = 11'd{v};" for i,v in enumerate(ACCELERATIONS)]
-    lines += ['    endcase end', 'endfunction', '// Stop sums above every legal move are rejected with a 14-bit sentinel.',
+    lines += ['    endcase end', 'endfunction',
+              '// Kept for the standalone reference planners (motion_planner.v,',
+              '// compact_motion_planner.v). The integrated shared engine tracks the',
+              '// exact Q11 brake sum incrementally and does not use this table.',
+              '// Stop sums above every legal move are rejected with a 14-bit sentinel.',
               'function [13:0] profile_stopping;',
               '    input [5:0] code;', '    begin case (code)']
     for a,accel in enumerate(ACCELERATIONS):
         for v,speed in enumerate(VELOCITIES):
             # Independent finite sum, avoiding the RTL's recurrence or a
             # quotient/product formula when producing the ROM truth table.
-            # Raw Q11 distance steps*2048; ceil to integer steps for the
-            # integer-only brake test (at most 1 step early).
-            stopping = sum(range(speed, 0, -accel))
-            steps = (stopping + 2047) // 2048
+            # Truncate each Q11 speed to whole steps before summing: this is
+            # exactly the integer brake the engine and its oracle implement.
+            steps = sum(sv >> 11 for sv in range(speed, 0, -accel))
             # A selected speed must stop within remaining <=8191.
             # The sentinel 0x3FFF exceeds that bound, preserving every decision.
             stopping = steps if steps <= 8191 else 16383

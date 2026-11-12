@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 `default_nettype none
 // One scheduled PI/planner bit-serial engine. PI consumes the completed
-// reference before the planner advances it. Position subtraction, PI sums and
-// planner operations all use the same adder.
-// reference_position is Q13.8 {pos_int[13:0], pos_frac[7:0]} and
-// reference_velocity is Q11 signed [13:0]; valid only when calculating=0.
+// reference before the planner advances it. Position advancement, remaining
+// distance, the brake sum, PI sums and every planner operation share the same
+// 1-bit adder, so there is no wide parallel arithmetic anywhere in the engine.
+// reference_position is Q11 (25 bits: 14 integer + 11 fraction, so pos += vel
+// is exact) and reference_velocity is Q11 signed [13:0]; both are meaningful
+// only when calculating=0 (every register rotates in place during a pass).
 // STABLE_CONFIG=1 requires target/profile/gains stable throughout a move.
 // STABLE_CONFIG=0 captures goal/profile at start and gains on each accepted
 // tick. start_position is the launch origin on start and live encoder sample
@@ -15,15 +17,19 @@
 // integrated 10 MHz / 1 kHz controller provides 10000). Reset spans a clock.
 //
 // Numeric spec: Q11 rates (ref_vel [13:0], speed_limit [12:0], accel [10:0]),
-// position Q13.8, stopping [13:0] integer with 0x3FFF sentinel. v+=a is a
-// direct add, pos+=v is a fixed 3-bit shift (velocity>>3). Fraction never
-// enters the brake test (integer-only, at most 1 step early/late).
+// Q11 position and brake distance (25 bits), no stopping table. The brake sum
+// S is maintained exactly in Q11: S(s) = s + S(s-a), so accelerating from s to
+// min(s+a, vmax) adds the new speed, holding keeps S and decelerating
+// subtracts the current speed. A candidate is accepted only when its exact
+// brake sum fits in the exact remaining distance, so the reference can never
+// overshoot the target. Finishing is integer: the reference stops once its
+// integer position equals the target (sub-step residue < 1 step).
 module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
     input wire clk, rst_n, enable, control_enable, clear_control, start, tick,
     input wire signed [12:0] start_position, target_position,
     input wire [5:0] plan_code,
     input wire [1:0] kp_select, ki_select,
-    output reg signed [21:0] reference_position,
+    output reg signed [24:0] reference_position,
     output wire signed [13:0] reference_velocity,
     output reg planner_busy, planner_done,
     output wire planner_calculating, pi_calculating, calculating,
@@ -34,15 +40,12 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
     localparam [5:0] IDLE=0, PI_READY=1, PI_SUM=2, PI_SUM_DONE=3,
         PI_CLAMP=4, PI_COMPARE_START=5, PI_COMPARE=6, PI_FILL_START=7,
         PI_FILL=8, PI_CLAMP_DONE=9, PI_PUBLISH=10, PI_ERROR=11;
-    localparam [5:0] P_IDLE=32, ADVANCE=34, BEGIN_DIST=35, DIST=36,
-        TAIL_SPEED=37, TAIL_ACCEL=38, TAIL_LIMIT=39, BEGIN_ACCEL=40, ACCEL=41,
-        CAP=42, STOP_ADD_A=43, STOP=44, TEST_NEW=45, TEST_OLD=46,
-        ACCEPT_ADD=47, ACCEPT_STOP=48, ACCEPT_SPEED=49, DEC_STOP=50,
-        DEC_SPEED=51, BEGIN_POS=52, POSITION=53, VELOCITY=54,
-        TAIL_COPY=55, CAP_SPEED=56, CAP_STOP=57;
+    localparam [5:0] P_IDLE=32, ADVANCE=33, BEGIN_DIST=34, DIST=35,
+        BEGIN_ACCEL=40, ACCEL=41, CAP=42, LOAD_LIMIT=43, TRIAL=44,
+        TEST_NEW=45, ACCEPT_SPEED=46, CAP_SPEED=47, ACCEPT_ADD=48,
+        HOLD_TEST=49, DEC_STOP=50, DEC_SPEED=51, BEGIN_POS=52, POSITION=53;
     localparam [3:0] ZERO=0, SPEED=1, ACCELERATION=2, POSITION_SIGNED=3,
-        DISTANCE=4, GOAL=5, LIMIT=6, STOPPING=7, MAX_STOP=8, ACCUMULATOR=9,
-        SPEED_INT=10;
+        DISTANCE=4, GOAL=5, LIMIT=6, STOPPING=7, ACCUMULATOR=8;
     (* fsm_encoding = "none" *) reg [5:0] state;
     reg working;
     reg [4:0] bit_index;
@@ -56,85 +59,80 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
     wire signed [12:0] goal = STABLE_CONFIG != 0 ? target_position : latched_goal;
     reg negative, source_position_sign;
     reg [12:0] speed;
-    reg [13:0] stopping;
-    reg capped, finishing;
+    reg [24:0] stopping;
+    reg capped, grow, finishing;
     always @* begin
         operand_a = ZERO; operand = ZERO; subtract = 0;
         case (state)
+            ADVANCE: begin
+                operand_a=POSITION_SIGNED; operand=SPEED; subtract=negative;
+            end
             DIST: begin
                 operand_a=negative ? POSITION_SIGNED : GOAL;
                 operand=negative ? GOAL : POSITION_SIGNED; subtract=1;
             end
-            TAIL_SPEED: begin operand_a=ACCELERATION; operand=SPEED; subtract=1; end
-            TAIL_ACCEL: begin operand_a=ACCELERATION; operand=DISTANCE; subtract=1; end
-            TAIL_LIMIT: begin operand_a=LIMIT; operand=DISTANCE; subtract=1; end
             ACCEL, ACCEPT_SPEED: begin operand_a=SPEED; operand=ACCELERATION; end
-            CAP: begin operand_a=ACCUMULATOR; operand=LIMIT; subtract=1; end
-            STOP_ADD_A, ACCEPT_ADD: begin operand_a=STOPPING; operand=SPEED_INT; end
-            // Integer-only stopping: accel Q11 (0..2047) >>11 is always 0,
-            // so trial/accepted stopping adds only speed_int (speed>>11).
-            STOP: begin
-                operand_a=capped ? MAX_STOP : ACCUMULATOR;
-                operand=ZERO;
+            // acc already holds min(s+a, vmax); adding S(s) yields S(candidate).
+            // Holding at the limit keeps S unchanged, so add nothing.
+            TRIAL, ACCEPT_ADD: begin
+                operand_a=capped && at_limit ? ZERO : ACCUMULATOR;
+                operand=STOPPING;
             end
             TEST_NEW: begin operand_a=ACCUMULATOR; operand=DISTANCE; subtract=1; end
-            TEST_OLD: begin operand_a=STOPPING; operand=DISTANCE; subtract=1; end
-            ACCEPT_STOP: begin operand_a=ACCUMULATOR; operand=ZERO; end
-            DEC_STOP: begin operand_a=STOPPING; operand=SPEED_INT; subtract=1; end
+            HOLD_TEST: begin operand_a=STOPPING; operand=DISTANCE; subtract=1; end
+            DEC_STOP: begin operand_a=STOPPING; operand=SPEED; subtract=1; end
             DEC_SPEED: begin operand_a=SPEED; operand=ACCELERATION; subtract=1; end
-            TAIL_COPY: operand_a=DISTANCE;
-            CAP_SPEED: operand_a=LIMIT;
-            CAP_STOP: operand_a=MAX_STOP;
-            POSITION: begin operand_a=GOAL; operand=DISTANCE; subtract=!negative; end
-            VELOCITY: begin operand=SPEED; subtract=negative; end
+            CAP_SPEED, LOAD_LIMIT: operand_a=LIMIT;
+            // Within one step of the target the reference snaps exactly onto
+            // it (goal + 0) instead of being reconstructed from the residue.
+            POSITION: begin operand_a=GOAL; operand=finishing ? ZERO : DISTANCE;
+                              subtract=!negative && !finishing; end
         endcase
     end
     wire [12:0] vmax = profile_velocity(profile[2:0]);
     wire [10:0] accel = profile_acceleration(profile[5:3]);
-    wire [13:0] max_stop = profile_stopping(profile);
-    wire signed [13:0] pos_int = reference_position[21:8];
-    wire signed [13:0] goal_14 = {goal[12], goal};
-    // Parallel Q13.8 advance: velocity>>3 maps Q11 to Q13.8 (drop 3 LSBs).
-    // Signed Q11 velocity is +/- speed[12:0]; arithmetic >>3 keeps 11 bits
-    // (sign + 2 int + 8 frac), sign-extended to 22-bit Q13.8 position.
-    wire signed [13:0] vel_signed = negative ?
-        -$signed({1'b0, speed}) : $signed({1'b0, speed});
-    wire signed [10:0] vel_shifted_11 = vel_signed[13:3];
-    wire signed [21:0] vel_trunc_signed = {{11{vel_shifted_11[10]}}, vel_shifted_11};
-    // Integer stopping uses floor(speed/2048) (0..3): sub-step speeds
-    // contribute 0. Matches the test oracle (truncated per-speed sum);
-    // low-speed stopping is underestimated by up to a few steps, accepted
-    // for area (no ceil adder/OR). Capped path still uses exact LUT ceil.
-    wire speed_int_bit = bit_index == 0 ? speed[11] :
-                           bit_index == 1 ? speed[12] : 1'b0;
-    wire [10:0] source_bits = {
-        speed_int_bit,
-        bit_index < 14 ? max_stop[bit_index] : 1'b0,
-        bit_index < 14 ? stopping[0] : 1'b0,
+    wire signed [13:0] pos_int = reference_position[24:11];
+    wire signed [24:0] goal_q11 = {{1{goal[12]}}, goal, 11'b0};
+    // The full position register rotates during every position pass; DIST and
+    // POSITION replace it with the remaining distance and restore it again.
+    wire position_bit = reference_position[0];
+    wire position_signed_bit = bit_index < 25 ? reference_position[0] :
+                               source_position_sign;
+    wire goal_bit = bit_index < 25 ? goal_q11[bit_index] : goal_q11[24];
+    wire [8:0] source_bits = {
+        accumulator[0],
+        bit_index < 25 ? stopping[0] : 1'b0,
         bit_index < 13 ? vmax[bit_index] : 1'b0,
-        bit_index < 14 ? goal_14[bit_index] : goal_14[13],
-        bit_index < 14 ? reference_position[8] : 1'b0,
-        bit_index < 14 ? reference_position[8] : source_position_sign,
+        goal_bit,
+        bit_index < 25 ? position_bit : 1'b0,
+        position_signed_bit,
         bit_index < 11 ? accel[bit_index] : 1'b0,
         bit_index < 13 ? speed[0] : 1'b0,
         1'b0};
 
-    assign reference_velocity = $signed(accumulator[13:0]);
+    wire signed [13:0] speed_signed = negative ?
+        -$signed({1'b0, speed}) : $signed({1'b0, speed});
+    assign reference_velocity = speed_signed;
     assign calculating = state != IDLE || working;
     assign planner_calculating = state >= P_IDLE || working;
     assign pi_calculating = state > IDLE && state < P_IDLE;
 
-    wire write_position = state == DIST || state == POSITION;
+    // Holding at the profile limit must not re-add the cruise term: only a
+    // genuine speed increase grows the brake sum.
+    wire at_limit = !grow;
+    wire write_position = state == ADVANCE || state == DIST || state == POSITION;
     wire write_speed = state == ACCEPT_SPEED || state == DEC_SPEED ||
-        state == TAIL_COPY || state == CAP_SPEED;
-    wire write_stopping = state == ACCEPT_STOP || state == DEC_STOP ||
-        state == TAIL_COPY || state == CAP_STOP;
+        state == CAP_SPEED;
+    wire write_stopping = state == ACCEPT_ADD || state == DEC_STOP;
+    wire position_operand = operand_a == POSITION_SIGNED ||
+        operand == POSITION_SIGNED || operand_a == DISTANCE || operand == DISTANCE;
+    wire stopping_operand = operand_a == STOPPING || operand == STOPPING;
 
     task operation;
         input sub;
         input [5:0] next_state;
         begin
-            source_position_sign <= pos_int[13]; carry <= {1'b0,sub};
+            source_position_sign <= reference_position[24]; carry <= {1'b0,sub};
             bit_index <= 0; state <= next_state; working <= 1;
         end
     endtask
@@ -159,20 +157,18 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
     // PI error is (pos_int - measured) << 11 (Q11). Low 11 bits are zero;
     // bits 11..24 carry the 14-bit integer difference; bit 25 is the sign.
     // Index muxes preserve pos_int/work (no rotation needed here).
-    wire [3:0] err_idx_ok = (bit_index >= 11 && bit_index < 25);
     wire [4:0] err_idx = bit_index - 5'd11;
     wire pos_err_bit = bit_index < 11 ? 1'b0 :
         bit_index < 25 ? pos_int[err_idx[3:0]] : pos_int[13];
     wire meas_err_bit = bit_index < 11 ? 1'b0 :
         bit_index < 25 ? work[err_idx[3:0]] : work[13];
-    wire position_bit = pos_err_bit;
     wire measured_bit = meas_err_bit;
     wire [13:0] value = integral_phase ? integral : work;
     wire limit_bit = bit_index == 13 ? 1'b0 : vmax[bit_index];
     wire magnitude_bit = pi_negative ? (~value[0] ^ carry[1]) : value[0];
     wire limit_signed_bit = pi_negative ? (~limit_bit ^ carry[0]) : limit_bit;
     wire windup = clipped && pi_negative == error_negative;
-    wire alu_a = state == PI_ERROR ? position_bit :
+    wire alu_a = state == PI_ERROR ? pos_err_bit :
                  state == PI_SUM ? error_bit :
                  state == PI_COMPARE ? magnitude_bit : source_bits[operand_a];
     wire alu_b = state == PI_ERROR ? ~measured_bit :
@@ -184,10 +180,9 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
     wire compare_clipped = alu_sum[1] && (comparison_nonzero || alu_sum[0]);
     task begin_planner_advance;
         begin
-            reference_position <= $signed(reference_position) + vel_trunc_signed;
             finishing <= 0;
-            source_position_sign <= pos_int[13];
-            carry <= 1'b1; bit_index <= 0; state <= BEGIN_DIST; working <= 0;
+            carry <= {1'b0, negative}; bit_index <= 0; state <= ADVANCE;
+            working <= 1;
         end
     endtask
     task begin_planner;
@@ -245,7 +240,8 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
         if (!rst_n) begin
             reference_position <= 0; speed <= 0; planner_busy <= 0; planner_done <= 0;
             latched_profile <= 0; latched_goal <= 0; negative <= 0;
-            source_position_sign <= 0; stopping <= 0; capped <= 0; finishing <= 0;
+            source_position_sign <= 0; stopping <= 0;
+            capped <= 0; grow <= 0; finishing <= 0;
             state <= IDLE; working <= 0; accumulator <= 0;
             integral <= 0; velocity_command <= 0; saturated <= 0; pi_cancelled <= 0;
         end else begin
@@ -256,10 +252,10 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
                 state <= IDLE; working <= 0; accumulator <= 0;
                 integral <= 0; velocity_command <= 0; saturated <= 0;
             end else if (start && !planner_busy && state == IDLE) begin
-                reference_position <= {{1{start_position[12]}}, start_position,8'b0};
+                reference_position <= {{1{start_position[12]}}, start_position,11'b0};
                 latched_goal <= target_position; negative <= target_position < start_position;
                 latched_profile <= plan_code; speed <= 0; stopping <= 0;
-                accumulator <= 0; working <= 0; pi_cancelled <= 0;
+                grow <= 0; accumulator <= 0; working <= 0; pi_cancelled <= 0;
                 planner_busy <= start_position != target_position;
                 planner_done <= start_position == target_position;
                 integral <= 0; velocity_command <= 0; saturated <= 0;
@@ -283,13 +279,12 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
                 end else if (working) begin
                     if ((operand_a == SPEED || operand == SPEED || write_speed) && bit_index < 13)
                         speed <= {write_speed ? alu_sum[0] : speed[0],speed[12:1]};
-                    if ((operand_a == POSITION_SIGNED || operand_a == DISTANCE ||
-                         operand == POSITION_SIGNED || operand == DISTANCE || write_position) && bit_index < 14)
-                        reference_position[21:8] <= {write_position ? alu_sum[0] : reference_position[8],reference_position[21:9]};
-                    // pos_frac is preserved through integer-only DIST/POSITION;
-                    // only pos_int is replaced by remaining/reconstructed goal.
-                    if ((operand_a == STOPPING || operand == STOPPING || write_stopping) && bit_index < 14)
-                        stopping <= {write_stopping ? alu_sum[0] : stopping[0],stopping[13:1]};
+                    if ((write_position || position_operand) && bit_index < 25)
+                        reference_position <= {write_position ? alu_sum[0] : position_bit,
+                                               reference_position[24:1]};
+                    if ((write_stopping || stopping_operand) && bit_index < 25)
+                        stopping <= {write_stopping ? alu_sum[0] : stopping[0],
+                                     stopping[24:1]};
                     accumulator <= {alu_sum[0],accumulator[25:1]};
                     carry <= {1'b0,alu_sum[1]}; bit_index <= bit_index + 1'b1;
                     if (bit_index == 25) working <= 0;
@@ -297,7 +292,7 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
                     IDLE: if (tick) begin
                         if (control_enable && !clear_control) begin
                             work <= {{1{start_position[12]}}, start_position};
-                            source_position_sign <= pos_int[13];
+                            source_position_sign <= reference_position[24];
                             saved_kp <= kp_select; saved_ki <= ki_select;
                             integral_negative <= integral[13]; pi_cancelled <= 0;
                             integral_phase <= 0; carry <= 1; bit_index <= 0; overflow <= 0;
@@ -325,53 +320,40 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
                     ADVANCE: state <= BEGIN_DIST;
                     BEGIN_DIST: operation(1'b1,DIST);
                     DIST: begin
-                        if (accumulator[13:0] == 0) begin
+                        if (reference_position[24:11] == 0) begin
                             speed <= 0; stopping <= 0; finishing <= 1; state <= BEGIN_POS;
-                        end else operation(1'b1,TAIL_SPEED);
+                        end else state <= BEGIN_ACCEL;
                     end
-                    // Numeric-spec integer brake has no separate tail phase;
-                    // bypass to normal accel selection (TAIL_COPY would need
-                    // distance*2048 scaling for Q11 speed).
-                    TAIL_SPEED: state <= BEGIN_ACCEL;
-                    TAIL_ACCEL: state <= BEGIN_ACCEL;
-                    TAIL_LIMIT: state <= BEGIN_ACCEL;
-                    // CAP is combinational (parallel 14-bit compare) to avoid a
-                    // serial mux bug and save 26 cycles; ACCEL result is in
-                    // accumulator[13:0], vmax is 13-bit.
                     BEGIN_ACCEL: operation(1'b0,ACCEL);
                     ACCEL: state <= CAP;
+                    // Decide against min(s+a, vmax): the accelerate candidate's
+                    // speed is left in the accumulator for the brake sum.
                     CAP: begin
                         capped <= accumulator[13:0] >= {1'b0, vmax};
-                        if (accumulator[13:0] >= {1'b0, vmax}) operation(1'b0,STOP);
-                        else operation(1'b0,STOP_ADD_A);
+                        grow <= accumulator[13:0] < {1'b0, vmax} || speed < vmax;
+                        if (accumulator[13:0] >= {1'b0, vmax}) operation(1'b0,LOAD_LIMIT);
+                        else operation(1'b0,TRIAL);
                     end
-                    STOP_ADD_A: operation(1'b0,STOP);
-                    STOP: operation(1'b1,TEST_NEW);
-                    TEST_NEW: if (!carry[0] || accumulator[13:0] == 0) begin
+                    LOAD_LIMIT: operation(1'b0,TRIAL);
+                    TRIAL: operation(1'b1,TEST_NEW);
+                    // Accept when S(candidate) <= remaining distance.
+                    TEST_NEW: if (!carry[0] || accumulator[24:0] == 0) begin
                         if (capped) operation(1'b0,CAP_SPEED);
-                        else operation(1'b0,ACCEPT_ADD);
-                    end else operation(1'b1,TEST_OLD);
-                    TEST_OLD: if (!carry[0] || accumulator[13:0] == 0) state <= BEGIN_POS;
-                              else operation(1'b1,DEC_STOP);
-                    ACCEPT_ADD: operation(1'b0,ACCEPT_STOP);
-                    ACCEPT_STOP: begin
-                        operation(1'b0,ACCEPT_SPEED);
-                    end
-                    ACCEPT_SPEED: state <= BEGIN_POS;
-                    DEC_STOP: begin
-                        operation(1'b1,DEC_SPEED);
-                    end
+                        else operation(1'b0,ACCEPT_SPEED);
+                    end else operation(1'b1,HOLD_TEST);
+                    // Hold when S(s) already fits in the remaining distance.
+                    HOLD_TEST: if (!carry[0] || accumulator[24:0] == 0) state <= BEGIN_POS;
+                               else operation(1'b1,DEC_STOP);
+                    CAP_SPEED: operation(1'b0,ACCEPT_ADD);
+                    ACCEPT_SPEED: operation(1'b0,ACCEPT_ADD);
+                    ACCEPT_ADD: state <= BEGIN_POS;
+                    DEC_STOP: operation(1'b1,DEC_SPEED);
                     DEC_SPEED: begin
                         if (!carry[0]) begin speed <= 0; stopping <= 0; end
                         state <= BEGIN_POS;
                     end
-                    TAIL_COPY, CAP_STOP: state <= BEGIN_POS;
-                    CAP_SPEED: operation(1'b0,CAP_STOP);
-                    BEGIN_POS: operation(!negative,POSITION);
+                    BEGIN_POS: operation(!negative && !finishing,POSITION);
                     POSITION: begin
-                        operation(negative,VELOCITY);
-                    end
-                    VELOCITY: begin
                         if (finishing) begin planner_busy <= 0; planner_done <= 1; end
                         state <= IDLE;
                     end

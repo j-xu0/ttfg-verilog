@@ -169,3 +169,65 @@ serial-mux shuffling.
   **+7.2%**. Do not build on without a new state-cost idea.
 * `tmp/q8-area-test` (ours) — Q8 probe (do-not-merge) + this Q11
   retarget (3227876, pushed). CI workflows: `gds`, `test`, `docs`.
+
+## Update: exact Q11 brake, serial position advance (this branch, after 3227876)
+
+Implemented, tested locally, measured with the same flow (stock lib, the six
+`PROJECT_SOURCES` files): **51,315 → 47,614 µm² (−3,701, −7.2%)**, sequential
+20,207 → 21,162, cells 2,096 → 1,833. Engine standalone `STABLE_CONFIG=1`
+32,201 → 28,915.
+
+### What changed
+
+1. **The brake decision was reading the wrong operand.** `source_bits` had only
+   10 concatenation entries for an 11-bit wire, so `ACCUMULATOR` (index 9) read
+   `speed_int_bit` and `SPEED_INT` (index 10) read constant 0. `TEST_NEW`
+   therefore compared `speed>>11` against `remaining` instead of the trial
+   stopping distance: high-speed decel never fired and the planner ran away
+   positive. This is the "open correctness issue" above — root cause found.
+2. **The 64-entry stopping ROM is gone** (measured −2.3 k on its own). It only
+   existed because the integer (floor/ceil) brake sum was too coarse to trust
+   incrementally. The engine now tracks the exact Q11 sum
+   `S(s) = s + S(s-a)` and compares it with the exact Q11 remaining distance,
+   so no table, no sentinel and no ceil/floor mismatch is needed. Plan LUT keeps
+   only `vmax`/`accel` (8 entries each).
+3. **Position advance is serial again** (measured −3.3 to −3.9 k as a constant
+   stub). The Q11 retarget replaced the serial pass with a parallel 22-bit Q13.8
+   add plus a 14-bit negate — the largest single arithmetic block left in the
+   design. `reference_position` is now Q11 (25 bits), so `pos += vel` is an
+   exact 25-cycle serial add through the shared 1-bit adder and the velocity LSBs
+   are no longer truncated.
+4. **Reference velocity is combinational** (`negative ? -speed : speed`); the
+   26-cycle output pass is gone.
+5. **Finish snaps exactly onto the target.** The DIST pass leaves the signed Q11
+   remaining distance in the position register. When it is within one step the
+   POSITION pass restores `goal + 0`, so the resting reference error is exactly
+   zero (not "<1 step"). A candidate is only accepted when its exact brake sum
+   fits, so the reference cannot overshoot.
+6. `stopping` grew 14 → 25 bits (+11 FF ≈ +0.76 k) and `ACCEL` gained a small
+   `speed < vmax` compare (1 FF + ~30 gates) so that holding at the profile
+   limit does not re-add the cruise term.
+
+### Verified
+
+* `test_shared_controller.py` (both `STABLE_CONFIG` values) passes: 64 profiles
+  × 20 000 random-feedback ticks, all gain pairs, cancellation sweep. The oracle
+  is now a stateful model of the documented brake recurrence instead of
+  recomputing a floor sum per candidate.
+* `test_spi`, `test_encoder`, `test_timebase`, `test_pi` pass; `test_step_dir`
+  has the same 10 pre-existing Q16-vs-Q11 failures as before this change.
+* Worst-case latency per tick stays far inside the 2 000-clock test bound and
+  the 10 000-clock control period.
+
+### Not done / dead ends confirmed
+
+* Deleting `work` is worth ≤0.9 k: it is already the optimally shared register
+  (measured sample during PI_ERROR/PI_SUM, command afterwards). Parking the
+  sample in `stopping` only moves the 14 bits.
+* SPI `tx_shift` de-duplication measures **+0.2 k** (only 4 of 16 bits survive
+  constant folding, and the status mux costs more).
+* Deleting the dead `TAIL_*` states measures **+0.3 k** (FSM re-encoding).
+* Yosys-chosen FSM encoding **+1.1 k**, one-hot **+2.8 k**; keep `"none"`.
+* A hand-written parallel planner with dedicated adders measures 21.5 k
+  standalone versus 21.8 k for the bit-serial planner: un-serializing buys
+  nothing. The 1-bit adder plus 1-bit muxes are at the frontier.

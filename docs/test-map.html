@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stepper Controller — Functional Test Map</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #182236;
+    --panel-2: #1e2b42;
+    --ink: #e7edf7;
+    --muted: #9fb0c8;
+    --line: #34445f;
+    --accent: #67e8f9;
+    --accent-2: #a78bfa;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #fb7185;
+    --blue: #60a5fa;
+    --chip: #22324d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 20px 56px;
+    background: radial-gradient(1200px 600px at 20% -10%, #1b2a44 0%, var(--bg) 55%);
+    color: var(--ink);
+    font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -0.02em; }
+  h2 { margin: 0 0 4px; font-size: 17px; letter-spacing: -0.01em; }
+  h3 { margin: 0; font-size: 14px; }
+  p  { margin: 6px 0 0; color: var(--muted); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #c7d7ef; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .panel {
+    background: linear-gradient(180deg, rgba(255,255,255,.025), transparent 60%), var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px;
+    margin: 0 0 18px;
+  }
+  .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .tiny { font-size: 12px; color: var(--muted); }
+
+  /* ---------- summary ---------- */
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
+  .stat {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 14px 12px;
+    position: relative;
+    overflow: hidden;
+  }
+  .stat::after {
+    content: ""; position: absolute; inset: auto 0 0 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  }
+  .stat .num { font-size: 28px; font-weight: 700; letter-spacing: -0.03em; }
+  .stat .lbl { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .stat.green::after { background: var(--green); }
+  .stat.amber::after { background: var(--amber); }
+  .stat.blue::after  { background: var(--blue); }
+
+  /* ---------- hierarchy ---------- */
+  .tree { padding: 4px 0 0; }
+  .chip-top {
+    width: min(460px, 100%);
+    margin: 0 auto;
+    text-align: center;
+    background: linear-gradient(180deg, #24405c, #1b2e46);
+    border: 1px solid #4c7ea8;
+    border-radius: 12px;
+    padding: 12px 16px;
+    box-shadow: 0 0 0 4px rgba(103,232,249,.05);
+  }
+  .chip-top h3 { color: #bdefff; }
+  .trunk { width: 2px; height: 22px; margin: 0 auto; background: var(--line); }
+  .branches {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+    position: relative;
+    padding-top: 18px;
+  }
+  .branches::before {
+    content: ""; position: absolute; top: 0; left: 10%; right: 10%;
+    height: 2px; background: var(--line);
+  }
+  .branch { position: relative; }
+  .branch::before {
+    content: ""; position: absolute; top: -18px; left: 50%;
+    width: 2px; height: 18px; background: var(--line); transform: translateX(-50%);
+  }
+  .card {
+    height: 100%;
+    background: var(--chip);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 11px 11px 10px;
+  }
+  .card .mod { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #d9e7fb; word-break: break-word; }
+  .card .role { color: var(--muted); font-size: 11px; margin-top: 3px; min-height: 30px; }
+  .card .suite { margin-top: 8px; font-family: ui-monospace, monospace; font-size: 11px; color: var(--accent); word-break: break-word; }
+  .card .runs { margin-top: 6px; display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #0e1b2e; border: 1px solid var(--line); color: #cfe0f7; }
+
+  .reference {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--line);
+  }
+  .reference-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; margin-top: 10px; }
+  .card.ref { background: #17253a; border-style: dashed; }
+  .card.ref .suite { color: var(--amber); }
+
+  /* ---------- bars ---------- */
+  .bars { display: grid; grid-template-columns: 210px 1fr 54px; gap: 8px 12px; align-items: center; }
+  .bar-label { font-family: ui-monospace, monospace; font-size: 12px; color: #d8e5f7; text-align: right; }
+  .bar-track { background: #0e1727; border: 1px solid var(--line); border-radius: 7px; height: 22px; overflow: hidden; }
+  .bar-fill {
+    height: 100%;
+    border-radius: 6px 0 0 6px;
+    background: linear-gradient(90deg, #0ea5b7, var(--accent));
+    min-width: 4px;
+  }
+  .bar-fill.legacy { background: linear-gradient(90deg, #6d5bd0, var(--accent-2)); }
+  .bar-fill.e2e { background: linear-gradient(90deg, #1f9d6f, var(--green)); }
+  .bar-count { font-variant-numeric: tabular-nums; font-weight: 700; text-align: right; color: #dce8fa; }
+
+  /* ---------- e2e ---------- */
+  .e2e-wrap { display: grid; grid-template-columns: 220px 1fr; gap: 14px; align-items: start; }
+  .tb-box {
+    background: linear-gradient(180deg, #1d3b35, #162a27);
+    border: 1px solid #2f6d5c;
+    border-radius: 12px;
+    padding: 14px;
+    text-align: center;
+  }
+  .tb-box .big { font-size: 26px; font-weight: 700; color: #a7f3d0; }
+  .tb-box code { color: #b9f3dc; }
+  .e2e-list { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+  .test-chip {
+    background: var(--chip);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--blue);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .test-chip span.name { font-family: ui-monospace, monospace; color: #dce9fb; overflow-wrap: anywhere; }
+  .tag {
+    flex: none;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    padding: 2px 6px;
+    border-radius: 999px;
+    border: 1px solid;
+    white-space: nowrap;
+  }
+  .tag.black { color: #bfdbfe; border-color: #3b6fa8; background: rgba(96,165,250,.10); }
+  .tag.white { color: #fde68a; border-color: #8a6a1f; background: rgba(251,191,36,.10); }
+  .e2e-note { margin-top: 12px; }
+
+  /* ---------- legend / footer ---------- */
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .status { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; margin-top: 4px; }
+  .status .box { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; }
+  .status .box b { display: block; margin-bottom: 3px; }
+  .ok { color: var(--green); }
+  .warn { color: var(--amber); }
+  .bad { color: var(--red); }
+
+  @media (max-width: 900px) {
+    .stats { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .branches { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .branches::before, .branch::before { display: none; }
+    .reference-grid { grid-template-columns: 1fr; }
+    .e2e-wrap { grid-template-columns: 1fr; }
+    .e2e-list { grid-template-columns: 1fr; }
+    .status { grid-template-columns: 1fr; }
+    .bars { grid-template-columns: 150px 1fr 44px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Functional Test Map — <code>tt_um_j_xu0_stepper</code></h1>
+  <p class="sub">How the verification suites map to the RTL, and how the 8 chip-level tests relate to unit/subsystem tests.</p>
+
+  <section class="panel">
+    <div class="stats">
+      <div class="stat blue">
+        <div class="num">27</div>
+        <div class="lbl">module / subsystem cocotb runs<br><span class="tiny">8 suites, parameterized configs</span></div>
+      </div>
+      <div class="stat green">
+        <div class="num">8</div>
+        <div class="lbl">chip-level integration tests<br><span class="tiny">through <code>tb.v</code> + external pins</span></div>
+      </div>
+      <div class="stat amber">
+        <div class="num">35</div>
+        <div class="lbl">total simulation runs<br><span class="tiny">27 block + 8 chip</span></div>
+      </div>
+      <div class="stat">
+        <div class="num">1</div>
+        <div class="lbl">pure-Python generator check<br><span class="tiny"><code>plan_lut.vh</code> reproducibility</span></div>
+      </div>
+    </div>
+    <p class="tiny" style="margin-top:12px">One “run” = one cocotb test function in one compiled parameter configuration. Internal directed cases are far more numerous (e.g. all 64 profiles, 16 gain pairs, 1,200 randomized PI steps).</p>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>1 · Chip hierarchy → test suite</h2>
+        <p>Solid boxes are instantiated by the chip top. Dashed boxes are standalone/reference modules tested independently but <b>not in the chip</b>.</p>
+      </div>
+      <div class="legend">
+        <span><i style="background:#4c7ea8"></i>in chip top</span>
+        <span><i style="background:transparent;border:1px dashed #9fb0c8"></i>reference only</span>
+      </div>
+    </div>
+
+    <div class="tree">
+      <div class="chip-top">
+        <h3><code>project.v</code> — <code>tt_um_j_xu0_stepper</code></h3>
+        <div class="tiny">SPI command registers · closed-loop motion · STEP/DIR/ENABLE · status/fault</div>
+      </div>
+      <div class="trunk"></div>
+      <div class="branches">
+
+        <div class="branch"><div class="card">
+          <div class="mod">stepper_spi.v</div>
+          <div class="role">Mode-0 SPI, frame validation, atomic commit</div>
+          <div class="suite">test_spi.py</div>
+          <div class="runs">1 run</div>
+        </div></div>
+
+        <div class="branch"><div class="card">
+          <div class="mod">quadrature_decoder.v</div>
+          <div class="role">x4 encoder, direction, wrap, sticky fault</div>
+          <div class="suite">test_encoder.py</div>
+          <div class="runs">1 run</div>
+        </div></div>
+
+        <div class="branch"><div class="card">
+          <div class="mod">control_timebase.v</div>
+          <div class="role">1 kHz control-tick enable</div>
+          <div class="suite">test_timebase.py</div>
+          <div class="runs">3 runs</div>
+        </div></div>
+
+        <div class="branch"><div class="card">
+          <div class="mod">shared_motion_controller.v</div>
+          <div class="role">Planner + PI + shared serial ALU / storage</div>
+          <div class="suite">test_shared_controller.py</div>
+          <div class="runs">4 runs</div>
+        </div></div>
+
+        <div class="branch"><div class="card">
+          <div class="mod">step_dir_generator.v</div>
+          <div class="role">Rate cap, pulse widths, DIR/ENABLE timing</div>
+          <div class="suite">test_step_dir.py</div>
+          <div class="runs">10 runs</div>
+        </div></div>
+
+      </div>
+
+      <div class="reference">
+        <div class="tiny"><b>Reference / legacy modules — tested, not instantiated by the chip top</b></div>
+        <div class="reference-grid">
+          <div class="card ref">
+            <div class="mod">motion_planner.v</div>
+            <div class="role">Parallel reference planner</div>
+            <div class="suite">test_planner.py</div>
+            <div class="runs">3 runs</div>
+          </div>
+          <div class="card ref">
+            <div class="mod">compact_motion_planner.v</div>
+            <div class="role">Compact planner + 64-profile LUT</div>
+            <div class="suite">test_compact_planner.py</div>
+            <div class="runs">2 runs + LUT check</div>
+          </div>
+          <div class="card ref">
+            <div class="mod">pi_controller.v</div>
+            <div class="role">Standalone PI reference</div>
+            <div class="suite">test_pi.py</div>
+            <div class="runs">3 runs</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>2 · Simulation runs by suite</h2>
+        <p>Relative volume of cocotb simulation runs. Bar is scaled to the 10-run STEP/DIR suite.</p>
+      </div>
+    </div>
+
+    <div class="bars">
+      <div class="bar-label">step_dir_generator</div>
+      <div class="bar-track"><div class="bar-fill" style="width:100%"></div></div>
+      <div class="bar-count">10</div>
+
+      <div class="bar-label">shared_controller</div>
+      <div class="bar-track"><div class="bar-fill" style="width:40%"></div></div>
+      <div class="bar-count">4</div>
+
+      <div class="bar-label">timebase</div>
+      <div class="bar-track"><div class="bar-fill" style="width:30%"></div></div>
+      <div class="bar-count">3</div>
+
+      <div class="bar-label">planner <span class="tiny">(ref)</span></div>
+      <div class="bar-track"><div class="bar-fill legacy" style="width:30%"></div></div>
+      <div class="bar-count">3</div>
+
+      <div class="bar-label">pi_controller <span class="tiny">(ref)</span></div>
+      <div class="bar-track"><div class="bar-fill legacy" style="width:30%"></div></div>
+      <div class="bar-count">3</div>
+
+      <div class="bar-label">compact_planner <span class="tiny">(ref)</span></div>
+      <div class="bar-track"><div class="bar-fill legacy" style="width:20%"></div></div>
+      <div class="bar-count">2</div>
+
+      <div class="bar-label">spi</div>
+      <div class="bar-track"><div class="bar-fill" style="width:10%"></div></div>
+      <div class="bar-count">1</div>
+
+      <div class="bar-label">encoder</div>
+      <div class="bar-track"><div class="bar-fill" style="width:10%"></div></div>
+      <div class="bar-count">1</div>
+
+      <div class="bar-label" style="padding-top:8px;border-top:1px solid var(--line)">chip integration</div>
+      <div class="bar-track" style="margin-top:8px;border-top:1px solid var(--line)"><div class="bar-fill e2e" style="width:80%"></div></div>
+      <div class="bar-count" style="padding-top:8px;border-top:1px solid var(--line)">8</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>3 · Overall integration — <code>test/tb.v</code> → <code>test/test.py</code></h2>
+        <p>One compiled top-level simulation; external pins only except where tagged white-box. Closed-loop “motor” model advances one legal x4 encoder count per STEP edge.</p>
+      </div>
+    </div>
+
+    <div class="e2e-wrap">
+      <div class="tb-box">
+        <div class="big">8 tests</div>
+        <div class="tiny" style="margin:4px 0 10px">one build · 10 MHz clk · 500 kHz SPI</div>
+        <div style="display:grid;gap:6px;font-size:12px">
+          <div><span class="tag black">5</span> black-box pin tests</div>
+          <div><span class="tag white">3</span> white-box hierarchy</div>
+        </div>
+        <p class="tiny" style="margin-top:10px">White-box tests are skipped with <code>GATES=yes</code>. Black-box tests are gate-level-ready.</p>
+      </div>
+
+      <div>
+        <div class="e2e-list">
+          <div class="test-chip"><span class="name">ports_status_and_reset</span><span class="tag black">pin</span></div>
+          <div class="test-chip"><span class="name">closed_loop_moves_and_disturbance</span><span class="tag black">pin</span></div>
+          <div class="test-chip"><span class="name">motion_abort_and_fault</span><span class="tag black">pin</span></div>
+          <div class="test-chip"><span class="name">absolute_encoder_range_fault</span><span class="tag black">pin</span></div>
+          <div class="test-chip"><span class="name">full_speed_and_default_limits</span><span class="tag black">pin</span></div>
+          <div class="test-chip"><span class="name">rtl_register_and_encoder_integration</span><span class="tag white">white-box</span></div>
+          <div class="test-chip"><span class="name">serial_reference_sampling</span><span class="tag white">white-box</span></div>
+          <div class="test-chip"><span class="name">shared_engine_abort_phases</span><span class="tag white">white-box</span></div>
+        </div>
+        <p class="tiny e2e-note">Coverage: pins/status/reset · dropped step + shaft disturbance · new/same TARGET · abort/fault · both signed range boundaries · 10 kHz pulse ceiling · lowest PLAN codes · serial sampling before workspace reuse · disable/reset during PI and planner phases.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>4 · What the layers prove — and what they don’t</h2>
+      </div>
+    </div>
+    <div class="status">
+      <div class="box">
+        <b class="ok">Strong: module/subsystem correctness</b>
+        <span class="tiny">Independent Python oracles compare command, integral, trajectory, pulse phase, register state. Directed corners + seeded random inputs. Subsystem suite checks exact shared-engine lifecycle and cancellation.</span>
+      </div>
+      <div class="box">
+        <b class="warn">Moderate: chip-level e2e</b>
+        <span class="tiny">8 directed scenarios through real pins with a digital motor model. Endpoint/property assertions, not a full-system per-tick scoreboard. Module corner cases are not all repeated at top level.</span>
+      </div>
+      <div class="box">
+        <b class="bad">Not covered yet</b>
+        <span class="tiny">No gate-level run of the full chip (1x1 hardening fails on area), no formal properties/equivalence, no functional coverage metric, no real motor/driver/board validation, no SPI majority voting or glitch filtering.</span>
+      </div>
+    </div>
+    <p class="tiny" style="margin-top:12px"><b>Status:</b> counts reflect the Q16 shared-engine baseline, where module suites and the 8 integration tests pass. The checked-out <code>tmp/q8-area-test</code> branch is a temporary Q8 experiment that intentionally breaks low-acceleration profiles and fails its test run; it is not a valid baseline.</p>
+  </section>
+
+</div>
+</body>
+</html>

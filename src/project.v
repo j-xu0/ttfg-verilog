@@ -34,7 +34,7 @@ module tt_um_j_xu0_stepper (
   wire launch = run_allowed && command_pending && !active;
   wire control_ce, planner_busy, planner_done, planner_calculating, pi_calculating;
   wire engine_calculating;
-  wire signed [21:0] reference_position;
+  wire signed [24:0] reference_position;
   wire signed [13:0] reference_velocity, velocity_command;
   // An idle planner for an armed move has completed at the latched TARGET.
   // Workspace outputs are deliberately invalid during serial calculations.
