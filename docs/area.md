@@ -16,8 +16,7 @@ on commit `2ed4e39`:
 
 The restriction set that closed the gap: P-only loop, no velocity feedforward,
 Kp fixed at the former code 1 (error clamp ±32, `<< 9`), `vmax` fixed at 8191.
-Acceleration stays `PLAN`-selected. Reserved: `CONTROL[3:2]` (gain) and
-`PLAN[2:0]` (velocity). See
+Acceleration is the 3-bit PLAN code. Reserved: SPI addr 1 (ex-CONTROL gain) — rejected.
 [the control contract](motion-planning.md#integrated-q11-numeric-format) for the
 numeric consequences.
 

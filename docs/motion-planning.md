@@ -12,7 +12,7 @@ Valid absolute coordinates are -4096 through 4095. The decoder's modulo wrap is
 caught by the top-level sticky range fault, so crossing either signed boundary
 stops motion rather than causing a full-range correction.
 
-Configure CONTROL and PLAN, then write TARGET. Every accepted TARGET commit is
+Configure PLAN, then write TARGET. Every accepted TARGET commit is
 a command, including a repeated value. A command written while motion is disabled
 is queued until enable. TARGET starts a trajectory at the measured position.
 All register writes are rejected if busy occurs at any point during their SPI
@@ -37,11 +37,11 @@ correction against the retained final reference without a new trajectory.
 ## Numerical format and lookup tables
 
 The integrated controller uses fixed **Q11** arithmetic; see
-[Integrated Q11 numeric format](#integrated-q11-numeric-format) below. The tables
-below describe the standalone Q16 references. For the active host-visible
-`PLAN` mapping, use the integrated Q11 section; vmax and Kp are fixed.
+[Integrated Q11 numeric format](#integrated-q11-numeric-format) below. The table
+below is proposal background in Q16 units. The RTL uses Q11 only; the
+standalone Q16 references were deleted on `nick/bug-fixes`.
 
-The standalone Q16 references use:
+Proposal Q16 units (background only):
 
 - Position reference: signed 29-bit integer position with 16 fractional bits.
 - Reference and commanded velocity: signed 21-bit steps/control-tick with 16
@@ -93,16 +93,16 @@ integer bits, valid only while the ceiling stays below ~8,600 steps/s (a
 the 24-bit reference covers the whole legal position range and doubles as
 scratch for the signed remaining distance during the brake decision.
 
-**Current 1x1 restriction.** `vmax` is fixed at 8191; acceleration remains
-`PLAN[5:3]`-selected; `PLAN[2:0]` and `CONTROL[3:2]` are reserved.
+**Current 1x1 restriction.** `vmax` is fixed at 8191; acceleration is the 3-bit PLAN
+code; SPI addr 1 (ex-CONTROL) is reserved and rejected.
 
 The brake sum is maintained **exactly** in Q11 as `S(s) = s + S(s-a)`:
 accelerating to `s'` adds `s'`, holding at `s` leaves `S` unchanged, decelerating
 subtracts the current `s`. A candidate speed is accepted only when its exact `S`
 fits inside the exact remaining distance, so the reference cannot overshoot and
 there is no stopping lookup table or sentinel in the integrated engine —
-unreachable profile pairs are simply never accepted. (The generated 64-entry
-`plan_lut.vh` table is used only by the standalone reference planners.) Within
+unreachable profile pairs are simply never accepted. (The generated 8-entry
+`plan_lut.vh` accel table feeds `motion_engine`.) Within
 one step of the target the reference snaps exactly onto it, so resting error is
 zero: sub-step residue is discarded, not accumulated.
 
@@ -158,13 +158,9 @@ Planner inputs remain stable while busy because SPI rejects writes. This permits
 `STABLE_CONFIG=1` to omit redundant target/profile registers. Disable/reset
 cancels an unfinished calculation; the next command starts from measured position.
 
-The original `motion_planner.v` (a mirror-rule reference with no stopping-distance
-arithmetic) and `pi_controller.v` remain as independently tested references,
-excluded from the physical source list. The superseded standalone compact planner
-and its duplicate suite have been removed; shared-controller tests cover the
-active serial planner.
-The integrated design uses Q11, fixed vmax and fixed Kp; the standalone
-references retain their own numerical contracts.
+The standalone `motion_planner.v` and `pi_controller.v` references were deleted on
+`nick/bug-fixes`; `test_shared_controller.py` covers the active serial planner.
+The integrated design uses Q11, fixed vmax and fixed Kp.
 
 ## Feedback arithmetic
 
@@ -173,12 +169,13 @@ references retain their own numerical contracts.
 > `reference[23:11] - measured` clamped to ±32 and shifted left 9 (Kp = 0.25
 > steps/tick per count). There is no feedforward and no runtime Kp select; the
 > command is clamped to the fixed `vmax = 8191`. The integrator, Ki register and
-> anti-windup path were removed. The Q16 PI description below is retained for the
-> standalone `pi_controller.v` reference and its unit tests.
+> anti-windup path were removed with the standalone references.
 
-## PI arithmetic
+## PI arithmetic (historical — standalone Q16 PI deleted)
 
-On each enabled control tick, error is the full signed difference between the
+> The section below describes the deleted Q16 PI. The ship design is P-only fixed-Kp.
+
+On each enabled control tick, error was the full signed difference between the
 Q16 reference and measured integer position shifted left 16; it never uses modulo
 subtraction. Command is `feedforward + Kp*error + old_integral`, clamped to the
 selected velocity limit. Then `Ki*error` is added to the integral and clamped to
@@ -193,8 +190,8 @@ feedback before serial error calculation; the old reference and speed are
 consumed before planner advancement. Gains/limit are read live and stay stable
 through the busy/write interlock. Command and saturation publish together before
 planner work starts. Internal integral storage is workspace while calculating.
-Ticks during work are ignored. Standalone legacy PI modes remain in reference
-tests; see [shared scheduling and register lifetimes](shared-controller.md).
+Ticks during work are ignored. The shipped P-only stage has no integral storage;
+see [shared scheduling and register lifetimes](shared-controller.md).
 
 A launch, disable, or final reference/feedback match clears PI state independent
 of tick. PI-only cancellation may finish restoring a shared ring after command
