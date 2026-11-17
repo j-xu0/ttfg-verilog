@@ -50,6 +50,21 @@ SPI rejects busy writes. The standalone captured-input mode latches target and
 profile at start and gains at the accepted tick. `start_position` carries live
 encoder feedback at each tick as well as the measured origin at launch.
 
+## Alternatives considered
+
+A symmetric mirror-rule planner (speed up for the first half of the move,
+mirror the distance when slowing down) was prototyped on this shared ALU in
+branch `nick/mirror-shared-engine`, reusing the PI schedule, handshake and
+abort semantics unchanged. It is functionally verified (shared numerical
+contract, cancellation sweep, full integration suite) and deletes the
+64-entry stopping LUT, but the travelled/total/turn state and extra serial
+states outweigh that saving: 63,641 um2 vs 59,393 um2 full-top in the same
+controlled GF180 flow (+7.2%). The standalone parallel mirror planner keeps
+its advantage (about -34% vs the parallel stopping planner); the saving does
+not survive serialization, where the stopping schedule's recompute-from-
+reference style uses less persistent state. Kept here as the stopping-rule
+engine for the 1x1 goal.
+
 ## Implementation warnings
 
 - Reference outputs are workspace while `calculating=1`, including during PI

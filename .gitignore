@@ -18,3 +18,5 @@ test/build/
 
 abc.history
 scripts/__pycache__/
+
+test/waves/

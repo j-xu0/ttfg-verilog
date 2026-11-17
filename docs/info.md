@@ -1,7 +1,8 @@
 ## How it works
 
 This SPI-controlled stepper servo plans a trapezoidal reference, compares it to
-quadrature feedback, and drives STEP/DIR through a saturated PI controller. The
+quadrature feedback, and drives STEP/DIR through a saturated proportional (P)
+controller. The
 system uses a 10 MHz clock and a 1 kHz control enable. One x4 encoder count is
 one motor-step position unit; reset establishes zero and no homing is performed.
 See `motion-planning.md` for numerical choices, command lifecycle, and timing.
@@ -55,12 +56,14 @@ atomically after synchronized CS deassertion, never during a partial transfer.
 | Address | Name | Width | Reset | Interpretation |
 | --- | --- | --- | --- | --- |
 | 0 | TARGET | 13 | 0 | Signed two's-complement position, -4096 to 4095 |
-| 1 | CONTROL | 4 | 0 | Upper two bits select kP, lower two bits select kI |
+| 1 | CONTROL | 4 | 0 | Upper two bits select kP; lower two bits are reserved (ignored) |
 | 2 | PLAN | 6 | 0 | Upper three bits select acceleration, lower three select velocity |
 | 3 | Reserved | - | - | Writes rejected |
 
-CONTROL and PLAN discard upper payload bits. Gain codes 00, 01, 10, 11 correspond
-to 1/8, 1/4, 1/2, 1. Configure CONTROL and PLAN before writing TARGET. A valid
+CONTROL and PLAN discard upper payload bits. The upper two CONTROL bits are the
+Kp gain code: 00, 01, 10, 11 correspond to 1/8, 1/4, 1/2, 1. The lower two bits
+are retained for register compatibility and currently ignored; feedback is
+P-only. Configure CONTROL and PLAN before writing TARGET. A valid
 TARGET commit arms a move, even if its value matches the previous target.
 Short and overlong frames are rejected; an empty selection is a no-op. Busy at any time during a transaction
 rejects its write, even if busy clears before CS rises. Reads still return status
@@ -113,10 +116,10 @@ and output rates must be established with the GF180 flow and the actual board
 and output loading. RTL tests alone do not prove them.
 
 All functional blocks now feed observable motion/status outputs. Generic Yosys
-synthesis passes, but the mandatory 1x1 allocation is still over budget. Local
-GF180 mapping measures 71,421 um² against a 51,967 um² core. Successful larger-tile
-checks do not establish 1x1 fit. See `area-optimization.md` for the current
-measurements and `hardening.md` for history.
+synthesis passes. The P-only revision measures **42,718.6 um²** with local GF180
+mapping against a 51,967 um² 1x1 core; CI floorplanning is the fit authority.
+See [`q13-handoff.md`](q13-handoff.md) for the current area work and
+`hardening.md` for history.
 
 ## How to test
 
