@@ -12,9 +12,8 @@ def render():
               '    input [2:0] code;', '    begin case (code)']
     lines += [f"        3'd{i}: profile_acceleration = 11'd{v};" for i,v in enumerate(ACCELERATIONS)]
     lines += ['    endcase end', 'endfunction',
-              '// Kept for the standalone reference planners (motion_planner.v,',
-              '// compact_motion_planner.v). The integrated shared engine tracks the',
-              '// exact Q11 brake sum incrementally and does not use this table.',
+              '// Legacy whole-step stopping estimates. The integrated shared engine',
+              '// tracks the exact Q11 brake sum incrementally and does not use this table.',
               '// Stop sums above every legal move are rejected with a 14-bit sentinel.',
               'function [13:0] profile_stopping;',
               '    input [5:0] code;', '    begin case (code)']
