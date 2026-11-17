@@ -20,3 +20,6 @@ abc.history
 scripts/__pycache__/
 
 test/waves/
+
+test/output/
+scripts/tests/__pycache__/
