@@ -1,5 +1,8 @@
 # Handoff: 1x1 area investigation (TinyTapeout GF180 stepper controller)
 
+> **Superseded (2026-11-17):** 1x1 fit is closed; see
+> [`p-only-fixed-kp.md`](p-only-fixed-kp.md). Historical notes follow.
+
 Date: 2026-11-05. Goal: fit the closed-loop stepper servo in a **1x1 tile
 (core 51,966.97 µm²)**. Current best (shared engine) is ~59.4k. Gap ≈ 7.4k
 (−12.5%).

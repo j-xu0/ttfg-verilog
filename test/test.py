@@ -314,7 +314,7 @@ async def full_speed_and_default_limits(dut):
 async def serial_reference_sampling(dut):
     """P feedback snapshots the completed reference before the planner reuses it."""
     await initialize(dut)
-    await spi_frame(dut, 0xA03F)  # CONTROL: Kp = 1 (upper two bits)
+    await spi_frame(dut, 0xA03F)  # CONTROL: gain field now reserved (fixed Kp)
     await spi_frame(dut, 0xC03F)
     await spi_frame(dut, 0x8004)
     set_input(dut, 5, 1)
@@ -336,12 +336,12 @@ async def serial_reference_sampling(dut):
         assert not int(top.pi_calculating.value)
         reference = signed(top.reference_position)
         feedback = signed(top.position)
-        feedforward = signed(top.reference_velocity)
-        # Q11 engine units: integer error scaled by 2048, kp=3 (control 0x3F)
-        # means unity gain, and the clamp is the plan-code-4 velocity limit.
-        vmax = 4096
+        # P-only fixed-Kp path: integer error scaled by 2048 (Q11), then the
+        # fixed 1/4 gain. No velocity feedforward. The clamp is the fixed
+        # 8191 Q11 velocity limit set by the current engine experiment.
+        vmax = 8191
         error = (reference // 2048 - feedback) * 2048
-        total = feedforward + error
+        total = error // 4
         command = max(-vmax, min(vmax, total))
         saturated = int(command != total)
         await RisingEdge(dut.clk)

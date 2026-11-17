@@ -76,7 +76,8 @@ Q8 experiment:
   from this branch at all;
 - fails the directed chip test `spi_init_short_move` (it never reaches the
   settled state), which is another reason to generate that trace from Q16;
-- still does not fit 1x1 (placement fails at 107.36% utilization).
+- did not fit 1x1 (placement failed at 107.36% utilization); the later P-only
+  fixed-Kp tip does fit.
 
 The only valid local reference is the Q16 baseline.
 

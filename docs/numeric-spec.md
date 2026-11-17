@@ -17,6 +17,9 @@ and `pos += v` is an exact Q11 add (no shift, no truncation). Acceleration has n
 integer bits, which is valid only while the velocity ceiling stays below
 ~8 600 steps/s; a 16 000 steps/s ceiling would require `[11:0]` (12 b).
 
+> **Current 1x1 restriction.** The velocity field is reserved: `vmax` is fixed at
+> 8191 (3.9995 steps/tick). Acceleration remains selectable from `PLAN[5:3]`.
+
 ## Position fields
 
 | Register | Signedness | Bits | Int | Frac | Total | Raw range | Physical range | LSB |
@@ -46,7 +49,8 @@ accepted. Within one step of the target the reference snaps exactly onto it, so
 the resting error is zero (sub-step residue is discarded, not accumulated).
 
 Storage total for the engine registers: position 24, brake sum 24, speed 13,
-accumulator 25, sampled measured/P command 14. Feedback is **P-only**: error is
-`(reference[23:11] - measured) << 11`, the Kp code selects 1/8…1, and the
-command `feedforward + Kp*error` is clamped to the profile velocity limit.
-There is no integrator, no Ki register, and no anti-windup path.
+accumulator 25, sampled measured/P command 14. Feedback is **P-only** with a
+**fixed gain**: error is `reference[23:11] - measured` (integer counts), clamped
+to ±32, then scaled by `2^9` (Kp = 0.25 steps/tick per count). There is no
+velocity feedforward, no runtime Kp register, no integrator, no Ki register, and
+no anti-windup path. The command is clamped to the fixed 8191 velocity ceiling.
