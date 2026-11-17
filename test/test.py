@@ -154,7 +154,7 @@ class MotorModel:
                     self.drop_next = False
                 else:
                     # Encoder response is asynchronous to clk and arrives well
-                    # before the next possible pulse at the 10 kHz rate cap.
+                    # before the next possible pulse at the 4 kHz rate cap.
                     direction = 1 if pins & 2 else -1
                     await Timer(500, unit="ns")
                     self.advance(direction)

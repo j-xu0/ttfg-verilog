@@ -22,7 +22,7 @@ the planner bit index; the bench still needs a guard), and hardware tuning remai
 - [The motion-control contract](docs/motion-planning.md)
 - [Area budget, measurement discipline, and rejected alternatives](docs/area.md)
 - [Running the tests](test/README.md)
-- [Waveform traces](test/waves/README.md)
+- [Generating and viewing waveforms](test/README.md#waveforms)
 
 The top module is `tt_um_j_xu0_stepper`. The GF180 build uses `gf180mcuD` and the
 repository's existing `ttgf26a` workflow. The system clock target is **10 MHz**;

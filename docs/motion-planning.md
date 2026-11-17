@@ -23,12 +23,12 @@ Motion enable assertion is synchronized. Raw low, `ena=0`, reset, or a sticky
 fault inhibits STEP/ENABLE immediately. Disable aborts, clears controller state,
 and discards the active command; re-enabling requires a new TARGET write. A target
 written while faulted cannot cause motion. Fault recovery requires reset.
-Hold reset across at least one rising clock edge because the shared planner/PI
-engine resets synchronously. Motion-pin suppression is immediate and does not
+Hold reset across at least one rising clock edge because the planner and P
+controller reset synchronously. Motion-pin suppression is immediate and does not
 wait for engine state to clear.
 
 A completed trajectory must have exact encoder feedback at the target for four
-control samples before At target asserts and Busy clears. The PI is cleared at
+control samples before At target asserts and Busy clears. The P command is cleared at
 the final reference/feedback match. The pulse generator receives zero velocity,
 finishes its normal active pulse, and ENABLE drops after settling. There is no
 idle holding torque. Feedback drift while enabled clears At target and reactivates
@@ -38,18 +38,17 @@ correction against the retained final reference without a new trajectory.
 
 The integrated controller uses fixed **Q11** arithmetic; see
 [Integrated Q11 numeric format](#integrated-q11-numeric-format) below. The tables
-here give the host-visible `PLAN` code → rate mapping, expressed in Q16 units
-because the standalone reference planners use Q16.
+below describe the standalone Q16 references. For the active host-visible
+`PLAN` mapping, use the integrated Q11 section; vmax and Kp are fixed.
 
-The shared controller uses, for the Q16 reference planners:
+The standalone Q16 references use:
 
 - Position reference: signed 29-bit integer position with 16 fractional bits.
 - Reference and commanded velocity: signed 21-bit steps/control-tick with 16
   fractional bits; speed limits are unsigned 20-bit values.
 - Acceleration: unsigned 13-bit raw steps/control-tick squared, 16 fractional bits.
-- Gains: two-bit codes 00, 01, 10, 11 select 1/8, 1/4, 1/2, 1. CONTROL[3:2]
-  selects Kp. CONTROL[1:0] were Ki and are now reserved/ignored in the P-only
-  integrated engine.
+- Reference PI gains: two-bit codes 00, 01, 10, 11 select 1/8, 1/4, 1/2, 1.
+  The integrated fixed-Kp design reserves all CONTROL gain bits.
 
 The detailed proposal's 1 kHz loop and acceleration endpoints are used. Intermediate
 lookup entries are explicit implementation choices; the proposals omit them.
@@ -143,17 +142,17 @@ the first tick. A short final step lands exactly on the target; the landing edge
 sets velocity zero and emits one-clock `done`. `SERIAL_SETUP` is retained as an
 ignored compatibility parameter; all configurations use the same mirror rule.
 
-The integrated `shared_motion_controller` uses a generated 64-entry lookup table
-for the exact discrete stopping sums of the supported velocity/acceleration
-pairs. Values larger than every legal move are represented by an always-rejected
-sentinel; accepted stopping sums remain exact. Reachability bounds reduce stored
-stopping distance to 29 bits and the shared bit-serial accumulator to 30 bits.
+The integrated planner uses a generated eight-entry Q11 acceleration lookup.
+Maximum velocity is fixed at 8191 raw Q11 units. Stopping distance is maintained
+incrementally by `motion_engine`; no stopping-distance ROM is used. Its serial
+accumulator is 25 bits and its stopping-distance register is 24 bits.
 
-Each accepted tick starts PI sampling/calculation followed by planner advancement,
-completing within 2,000 clocks before the next 10,000-clock control tick. Position
-and velocity are temporary arithmetic workspace while combined `calculating=1`
-and may only be sampled while idle. PI uses the previously completed reference
-and sampled encoder value. Target/settling logic does not consume workspace;
+Each accepted tick publishes the fixed-Kp command from the completed reference,
+then starts planner advancement, completing within 2,000 clocks before the next
+10,000-clock control tick. Reference position is arithmetic workspace while
+`calculating=1` and may only be sampled while idle. Feedback uses the completed
+reference and sampled encoder value, without velocity feedforward or an integral.
+Target/settling logic does not consume workspace;
 it uses planner busy/calculation status and integer target/feedback equality.
 Planner inputs remain stable while busy because SPI rejects writes. This permits
 `STABLE_CONFIG=1` to omit redundant target/profile registers. Disable/reset
@@ -164,8 +163,8 @@ arithmetic) and `pi_controller.v` remain as independently tested references,
 excluded from the physical source list. The superseded standalone compact planner
 and its duplicate suite have been removed; shared-controller tests cover the
 active serial planner.
-No speed, acceleration,
-gain, position-range, or Q16 fractional-resolution setting is removed.
+The integrated design uses Q11, fixed vmax and fixed Kp; the standalone
+references retain their own numerical contracts.
 
 ## Feedback arithmetic
 

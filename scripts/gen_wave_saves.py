@@ -89,22 +89,21 @@ TEMPLATES = {
         ("Step drops (timing_limited only)", ["timing_limited"],
          lambda changing: "timing_limited" in changing),
     ]),
-    "shared_motion_controller": ("Shared planner + PI engine", [
+    "shared_motion_controller": ("Serial planner + fixed-gain P controller", [
         (None, ["clk", "rst_n", "enable"]),
         ("Chip-facing control", ["start", "tick", "clear_control",
                                   "control_enable", "start_position",
-                                  "target_position", "plan_code",
-                                  "kp_select", "ki_select"]),
-        ("Shared engine", ["state", "next_state", "working", "work",
-                            "bit_index", "calculating", "planner_busy",
-                            "planner_done", "planner_calculating",
-                            "pi_calculating"]),
+                                  "target_position", "plan_code"]),
+        ("Lifecycle", ["calculating", "planner_busy", "planner_done",
+                       "planner_calculating", "pi_calculating"]),
         ("Planner outputs", ["reference_position", "reference_velocity"]),
-        ("PI outputs", ["velocity_command", "integral", "saturated"]),
-        ("Serial scratch", ["value", "accumulator", "carry",
-                             "integral_phase", "error_negative",
-                             "integral_negative", "goal", "goal_extended",
-                             "profile", "vmax"]),
+        ("P outputs", ["velocity_command", "saturated"]),
+        ("Serial planner", ["planner.state", "planner.working",
+                            "planner.bit_index", "planner.accumulator",
+                            "planner.carry", "planner.goal", "planner.profile",
+                            "planner.speed", "planner.stopping", "vmax"]),
+        ("P arithmetic", ["feedback.error", "feedback.error_clamped",
+                          "feedback.total"]),
     ]),
 }
 
@@ -211,7 +210,10 @@ def resolve(entries: list[tuple[str, str]], spec: str) -> str | None:
     """
     if "." in spec:
         suffix = "." + spec
-        matches = [full for full, _ in entries if full.endswith(suffix)]
+        matches = [full for full, leaf in entries
+                   if full.endswith(suffix) or
+                   ("[" not in spec and
+                    (full.rsplit(".", 1)[0] + "." + leaf.split("[")[0]).endswith(suffix))]
         return min(matches, key=len) if matches else None
     base = spec.split("[")[0]
     matches = [full for full, leaf in entries

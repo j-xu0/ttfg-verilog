@@ -20,3 +20,7 @@ abc.history
 scripts/__pycache__/
 
 test/waves/
+
+# Python bytecode in any test or tooling subdirectory
+__pycache__/
+*.py[cod]

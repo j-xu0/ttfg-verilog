@@ -5,7 +5,7 @@ These files are scratch prototypes used to price architectural options with
 workflow compiles this directory.
 
 * `pi_parallel_full.v` — dedicated parallel Q11 PI with every feature of the
-  current shared engine (4 kp/ki codes, feedforward, command clamp +
+  historical PI engine (4 kp/ki codes, feedforward, command clamp +
   `saturated`, integral clamp, anti-windup freeze). Measured 16,429 µm²,
   745 cells (±3 % mapping noise). Compare with the serial PI's marginal of 15,981 µm²: un-sharing
   the PI does **not** save area while a full PI is kept.
