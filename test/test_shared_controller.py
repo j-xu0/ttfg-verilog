@@ -55,16 +55,21 @@ def advance(position, velocity, stopping, target, vmax, acceleration, negative):
 
 
 class PControl:
-    """Integer-error proportional controller: command = ff + Kp*error, clamped."""
+    """Fixed-Kp P-only controller: command = clamp(Kp*error), clamped.
+
+    Kp is fixed at the former code 1 (Q11 error scaled by 1/4). Velocity
+    feedforward and runtime gain selection were removed from the RTL.
+    """
 
     def __init__(self):
         self.command = self.saturated = 0
 
     def update(self, position, measured, velocity, vmax, kp):
-        # Integer-only error: (pos_int - measured) << 11 (Q11). Gain codes
-        # 00..11 are 1/8..1, so the Q11 P term is error >> (3 - code).
+        # Integer-only error: (pos_int - measured) << 11 (Q11), then the fixed
+        # Kp=1 gain (1/4 in Q11). `velocity`/`kp` are retained for the existing
+        # call sites but are no longer part of the numeric contract.
         error = (position // 2048 - measured) * 2048
-        total = velocity + error // (8, 4, 2, 1)[kp]
+        total = error // 4
         self.command = clamp(total, vmax)
         self.saturated = int(total != self.command)
 
@@ -126,7 +131,9 @@ class Harness:
 
     async def tick(self, measured, kp, disturb=True, control=True):
         old_ref, old_command = self.ref, self.command_output()
-        vmax, accel = VELOCITIES[self.code & 7], ACCELS[self.code >> 3]
+        # The current engine experiment fixes vmax at 8191; acceleration is
+        # still selected by PLAN[5:3].
+        vmax, accel = 8191, ACCELS[self.code >> 3]
         if control:
             self.p.update(old_ref[0], measured, old_ref[1], vmax, kp)
         else:
