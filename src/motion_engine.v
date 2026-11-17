@@ -135,6 +135,7 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
             source_position_sign <= 0; stopping <= 0;
             capped <= 0; grow <= 0; finishing <= 0;
             state <= IDLE; working <= 0; accumulator <= 0;
+            bit_index <= 0;
         end else begin
             planner_done <= 0;
             if (!enable) begin
