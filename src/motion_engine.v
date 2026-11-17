@@ -68,8 +68,9 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
         endcase
     end
     // EXPERIMENT: fixed maximum velocity, acceleration still plan-selected.
-    wire [12:0] profile_limit = 13'd8191;
-    assign vmax = profile_limit;
+    // Single source of truth; all three uses below are the same ceiling.
+    localparam [12:0] VMAX = 13'd8191;
+    assign vmax = VMAX;
     wire [10:0] accel = profile_acceleration(profile);
     wire signed [12:0] pos_int = reference_position[23:11];
     wire signed [23:0] goal_q11 = {goal, 11'b0};
@@ -82,7 +83,7 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
     wire [8:0] source_bits = {
         accumulator[0],
         bit_index < 24 ? stopping[0] : 1'b0,
-        bit_index < 13 ? profile_limit[bit_index] : 1'b0,
+        bit_index < 13 ? VMAX[bit_index] : 1'b0,
         goal_bit,
         bit_index < 24 ? position_bit : 1'b0,
         position_signed_bit,
@@ -174,9 +175,9 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
                 // Decide against min(s+a, vmax): the accelerate candidate's
                 // speed is left in the accumulator for the brake sum.
                 CAP: begin
-                    capped <= accumulator[13:0] >= {1'b0, profile_limit};
-                    grow <= accumulator[13:0] < {1'b0, profile_limit} || speed < profile_limit;
-                    if (accumulator[13:0] >= {1'b0, profile_limit}) operation(1'b0,LOAD_LIMIT);
+                    capped <= accumulator[13:0] >= {1'b0, VMAX};
+                    grow <= accumulator[13:0] < {1'b0, VMAX} || speed < VMAX;
+                    if (accumulator[13:0] >= {1'b0, VMAX}) operation(1'b0,LOAD_LIMIT);
                     else operation(1'b0,TRIAL);
                 end
                 LOAD_LIMIT: operation(1'b0,TRIAL);
