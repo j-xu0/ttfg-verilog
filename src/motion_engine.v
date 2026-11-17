@@ -72,7 +72,6 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
     localparam [12:0] VMAX = 13'd8191;
     assign vmax = VMAX;
     wire [10:0] accel = profile_acceleration(profile);
-    wire signed [12:0] pos_int = reference_position[23:11];
     wire signed [23:0] goal_q11 = {goal, 11'b0};
     // The full position register rotates during every position pass; DIST and
     // POSITION replace it with the remaining distance and restore it again.

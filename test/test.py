@@ -143,7 +143,7 @@ class MotorModel:
             await Edge(self.dut.uo_out)
             await Timer(1, unit="ns")
             pins = int(self.dut.uo_out.value)
-            now = get_sim_time(unit="ns")
+            now = get_sim_time(unit="step")  # Integer picoseconds (tb.v precision).
             if pins & 1 and not self.previous & 1:
                 assert pins & 4, "STEP without ENABLE"
                 self.rise = now
@@ -213,7 +213,7 @@ async def closed_loop_moves_and_disturbance(dut):
     await spi_frame(dut, 0x8000 | ((-3) & 0x1FFF))
     await wait_settled(dut)
     assert motor.position == -3
-    assert motor.widths and min(motor.widths) >= 5000, motor.widths
+    assert motor.widths and min(motor.widths) >= 5_000_000, motor.widths
     assert int(dut.uio_oe.value) == 0
     assert int(dut.uio_out.value) == 0
 
@@ -300,15 +300,15 @@ async def full_speed_and_default_limits(dut):
     await wait_settled(dut, timeout_us=400000)
     assert motor.position == 1200
     gaps = [b-a for a, b in zip(motor.rises, motor.rises[1:])]
-    assert min(gaps) >= 250000, "exceeded 4 kHz cap"
-    assert gaps.count(250000) > 5, "did not exercise the 4 kHz ceiling"
+    assert min(gaps) >= 250_000_000, "exceeded 4 kHz cap"
+    assert gaps.count(250_000_000) > 5, "did not exercise the 4 kHz ceiling"
     # Lowest velocity/acceleration codes exercise the Q11 low-acceleration path
     # through SPI, planning, P feedback and actual encoder feedback.
     await spi_frame(dut, 0xC000)
     await spi_frame(dut, 0x8000 | 1201)
     await wait_settled(dut, timeout_us=300000)
     assert motor.position == 1201
-    assert motor.widths and min(motor.widths) >= 5000
+    assert motor.widths and min(motor.widths) >= 5_000_000
 
 
 @cocotb.test(skip=os.environ.get("GATES") == "yes")

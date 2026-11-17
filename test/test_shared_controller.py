@@ -13,7 +13,6 @@ from cocotb.clock import Clock
 from cocotb.triggers import Timer
 import pytest
 
-VELOCITIES = (205, 410, 1024, 2048, 4096, 5120, 6144, 8191)
 ACCELS = (1, 2, 4, 10, 20, 41, 102, 205)
 LATENCY_LIMIT = 2000
 
