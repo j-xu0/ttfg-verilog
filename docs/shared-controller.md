@@ -1,5 +1,9 @@
 # Shared planner/PI controller
 
+> **Update 2026-11-17:** this document records the shared-engine milestone. The
+> later P-only fixed-Kp restriction set hardens on 1x1; see
+> [`p-only-fixed-kp.md`](p-only-fixed-kp.md).
+
 ## Before and after
 
 The previous integrated design used independently scheduled planner and PI
@@ -12,10 +16,11 @@ is **58,174.9952 um² with 353 flip-flops**, a **5.1% area reduction**. Selectio
 and scheduling logic offset part of the storage saving; standalone block sums
 are not a substitute for this full-top measurement.
 
-**The design still does not fit 1x1.** Raw cells occupy 111.9% of the
-51,966.970 um² core before physical headroom. No profile, gain, position range,
-Q16 precision, driver timing or pin function was removed. STEP generation,
-encoder counting and SPI remain independent of the scheduled engine.
+**This milestone did not fit 1x1 by itself.** Raw cells occupied 111.9% of the
+51,966.970 um² core before physical headroom. The later P-only fixed-Kp
+restriction set closed the gap (CI run `44132561693`, 0 DRT violations). No host
+feature, position range, driver timing or pin function was removed. STEP
+generation, encoder counting and SPI remain independent of the scheduled engine.
 
 ## Schedule and register lifetimes
 

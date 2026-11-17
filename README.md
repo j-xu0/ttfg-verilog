@@ -2,18 +2,19 @@
 
 # Tiny Tapeout GF180 Stepper Motor Controller
 
-A staged implementation of the ECE298A stepper-driver proposal. The intended
-controller receives signed target positions over SPI, plans trapezoidal motion,
-and uses quadrature feedback and a PI controller to drive an external STEP/DIR
-motor driver.
+A staged implementation of the ECE298A stepper-driver proposal. The controller
+receives signed target positions over SPI, plans trapezoidal motion, and uses
+quadrature feedback and a fixed-gain proportional (P) controller to drive an
+external STEP/DIR motor driver.
 
 **Closed-loop RTL is implemented:** SPI command registers, synchronized encoder
-feedback, a Q16 trapezoidal planner, PI control with anti-windup, and timed
-STEP/DIR/ENABLE outputs. TARGET commands now drive motion in simulation, correct
+feedback, a Q11 trapezoidal planner, a fixed-gain P stage, and timed
+STEP/DIR/ENABLE outputs. TARGET commands drive motion in simulation, correct
 missed steps and disturbances, and report busy/settled/fault status.
 
-The numerical and driver-interface choices are documented below. GF180 tile fit,
-10 MHz physical timing, gate-level verification, and hardware tuning are pending.
+**The 1x1 tapeout build now hardens and passes precheck** (CI run
+`44132561693`: 0 DRT violations, minimum feasible density 0.8300). Post-layout
+timing signoff, gate-level test-harness X handling, and hardware tuning remain.
 
 - [Interface, pinout, and timing](docs/info.md)
 - [Implementation steps and unresolved proposal details](docs/implementation.md)
@@ -24,10 +25,11 @@ The top module is `tt_um_j_xu0_stepper`. The GF180 build uses `gf180mcuD` and th
 repository's existing `ttgf26a` workflow. The system clock target is **10 MHz**;
 `info.yaml` and the 100 ns constraint in `src/config.json` agree.
 
-**The mandatory allocation is 1x1.** The area-optimized controller still exceeds
-that budget: controlled GF180 synthesis measures 58,175 um² versus the original
-140,824 um². It is development RTL until a 1x1 hardening run succeeds. See
-[the optimization results](docs/area-optimization.md) and
+**The mandatory allocation is 1x1 and the current tip meets it.** The fit uses
+the P-only fixed-Kp restriction set: no velocity feedforward, fixed Kp (former
+code 1), and a fixed 8191 velocity ceiling. The earlier 58,175 um² design needed
+those cuts; see [the optimization results](docs/area-optimization.md),
+[the P-only restriction note](docs/p-only-fixed-kp.md), and
 [the hardening history](docs/hardening.md).
 
 With Python, Icarus Verilog, and make installed, run from the repository root:

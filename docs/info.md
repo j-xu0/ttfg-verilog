@@ -56,14 +56,15 @@ atomically after synchronized CS deassertion, never during a partial transfer.
 | Address | Name | Width | Reset | Interpretation |
 | --- | --- | --- | --- | --- |
 | 0 | TARGET | 13 | 0 | Signed two's-complement position, -4096 to 4095 |
-| 1 | CONTROL | 4 | 0 | Upper two bits select kP; lower two bits are reserved (ignored) |
-| 2 | PLAN | 6 | 0 | Upper three bits select acceleration, lower three select velocity |
+| 1 | CONTROL | 4 | 0 | Reserved; kP is fixed at the former code 1 |
+| 2 | PLAN | 6 | 0 | Upper three bits select acceleration; lower three reserved (vmax fixed) |
 | 3 | Reserved | - | - | Writes rejected |
 
-CONTROL and PLAN discard upper payload bits. The upper two CONTROL bits are the
-Kp gain code: 00, 01, 10, 11 correspond to 1/8, 1/4, 1/2, 1. The lower two bits
-are retained for register compatibility and currently ignored; feedback is
-P-only. Configure CONTROL and PLAN before writing TARGET. A valid
+CONTROL and PLAN discard upper payload bits. Kp is fixed at the former code 1,
+i.e. 0.25 steps/tick per encoder count (250 steps/s at 1 kHz); all four CONTROL
+bits are reserved and ignored. The PLAN acceleration field still selects one of
+eight profiles; the velocity field is reserved because `vmax` is fixed at 8191
+(3.9995 steps/tick). Configure CONTROL and PLAN before writing TARGET. A valid
 TARGET commit arms a move, even if its value matches the previous target.
 Short and overlong frames are rejected; an empty selection is a no-op. Busy at any time during a transaction
 rejects its write, even if busy clears before CS rises. Reads still return status
@@ -115,11 +116,12 @@ SKY130 pad limits; those numbers are not GF180 signoff limits. Maximum safe cloc
 and output rates must be established with the GF180 flow and the actual board
 and output loading. RTL tests alone do not prove them.
 
-All functional blocks now feed observable motion/status outputs. Generic Yosys
-synthesis passes. The P-only revision measures **42,718.6 um²** with local GF180
-mapping against a 51,967 um² 1x1 core; CI floorplanning is the fit authority.
-See [`q13-handoff.md`](q13-handoff.md) for the current area work and
-`hardening.md` for history.
+All functional blocks now feed observable motion/status outputs. The current
+P-only fixed-Kp tip **hardens on the 1x1 tile and passes precheck** (CI run
+`44132561693`: 0 DRT violations, minimum feasible density 0.8300). The measured
+cell area is 41,578 um² before routability inflation, 42,913 um² final, against
+the 51,967 um² core. See [`p-only-fixed-kp.md`](p-only-fixed-kp.md) and
+[`hardening.md`](hardening.md).
 
 ## How to test
 

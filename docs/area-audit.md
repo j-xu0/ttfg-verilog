@@ -1,5 +1,9 @@
 # Follow-up area audit (before the shared engine)
 
+> **Superseded (2026-11-17):** the P-only fixed-Kp restriction set now hardens on
+> the 1x1 tile and passes precheck. This audit is retained as history. See
+> [`p-only-fixed-kp.md`](p-only-fixed-kp.md).
+
 This records the independent-engine milestone at `4539f9d`. The subsequent
 [shared-engine implementation](shared-controller.md) reduces area further to
 58,174.9952 um²; the historical comparisons below retain their original values.

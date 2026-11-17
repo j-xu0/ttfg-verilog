@@ -10,10 +10,10 @@ choices needed to make that foundation testable.
 | 2 | Synchronized x4 quadrature decoder | Both directions, startup phases, illegal transitions, signed wrap, reset | Implemented |
 | 3 | GF180 top-level interface | 10 MHz/500 kHz integration, pin directions, fault/status/reset, motion pins | Implemented in RTL |
 | 4 | Timebase and trapezoidal planner | Reference model for acceleration/cruise/deceleration, reverse/short moves, range limits | Integrated shared planner/PI engine with profile LUT |
-| 5 | Fixed-point proportional feedback | Signed integer error, all Kp gains, command saturation | P-only in RTL (integrator/anti-windup removed for 1x1 area) |
+| 5 | Fixed-point proportional feedback | Signed integer error, fixed Kp, command saturation | P-only fixed-gain in RTL (no feedforward, integrator or anti-windup) |
 | 6 | STEP/DIR/ENABLE generator | Pulse width/spacing, DIR setup/hold, disable and fault interlocks | Implemented in RTL |
 | 7 | Closed-loop integration | Motor/encoder model, forward/reverse targets, disturbances, settling | Implemented in RTL |
-| 8 | GF180 submission checks | Full-design synthesis, tile fit, STA, gate-level tests, precheck and physical verification | 58.7% mapped area reduction; 1x1 still over budget |
+| 8 | GF180 submission checks | Full-design synthesis, tile fit, STA, gate-level tests, precheck and physical verification | 1x1 GDS + precheck pass (run 44132561693); gate-level X handling pending |
 
 Two subagents independently implemented steps 1 and 2 and their unit tests, then
 reviewed each other's modules. The main agent integrated the design and added
@@ -25,7 +25,7 @@ can write.
 
 The third implementation layer connects all functional blocks. The detailed
 proposal's 1 kHz loop and acceleration endpoints are used. Exact lookup tables,
-Q16 scaling, PI ordering, STEP timing, and command/fault/settling semantics are
+Q11 scaling, fixed-gain P ordering, STEP timing, and command/fault/settling semantics are
 specified in [`motion-planning.md`](motion-planning.md) and `info.md`.
 
 Three subagents implemented PI, pulse timing, and planner precision/serial
@@ -57,18 +57,19 @@ and its matching template/flow is a separate requirement before submission.
 
 The mandatory 1x1 constraint is restored. `shared_motion_controller.v` replaces
 the independent planner/PI engines with a generated 64-profile stopping LUT,
-reachable-range bounds, and bit-serial arithmetic and shared temporary storage. A dedicated single-cycle
-P stage publishes the clamped command; the integrator and anti-windup path were removed to fit 1x1. Exact phase-factor cancellation and
-split-phase accumulation shrink STEP generation. Host-visible registers, Q11
-position/velocity precision, all 64 profiles, driver timings, faults and settling
-remain supported.
+reachable-range bounds, and bit-serial arithmetic and shared temporary storage. A
+dedicated single-cycle P stage publishes the clamped command; the integrator,
+anti-windup and velocity feedforward paths were removed, and Kp and `vmax` are
+fixed. Exact phase-factor cancellation and split-phase accumulation shrink STEP
+generation. Host-visible registers, Q11 position/velocity precision, selectable
+acceleration profiles, driver timings, faults and settling remain supported.
 
-Controlled local GF180 mapping is now **42,718.6 um²** (from 140,824 um² at the
-first integration, −69.7 %), below the 51,967 um² 1x1 core area in synthesis.
-CI floorplanning decides the actual fit; see [`q13-handoff.md`](q13-handoff.md).
-[Area results](area-optimization.md) distinguish these synthesis measurements
-from physical verification. Do not enlarge the tile to bypass the check.
+The final P-only fixed-Kp tip **hardens on the 1x1 tile and passes precheck**
+(CI run `44132561693`: 0 DRT violations, minimum feasible density 0.8300, final
+placement area 42,913.48 um² against the 51,967 um² core). See
+[`p-only-fixed-kp.md`](p-only-fixed-kp.md) and
+[`hardening.md`](hardening.md) for the restriction set and run log. Do not
+enlarge the tile to bypass the check.
 
 The [shared-controller implementation](shared-controller.md) documents scheduling,
-register lifetimes, cancellation cleanup and verification. Sharing reduces area
-a further 5.1% from the preceding independent-engine design; it is not yet a fit.
+register lifetimes, cancellation cleanup and verification.

@@ -11,6 +11,20 @@ This keeps the closed loop but drops the two remaining P-stage features:
 generator, encoder and timebase are unchanged; `vmax` selection is still the
 fixed 8191 of the underlying experiment.
 
+## Result: 1x1 tapeout size reached
+
+This is the first variant that closes the 1x1 build. CI run `44132561693`
+passed GDS and precheck with 0 DRT violations and a minimum feasible density of
+0.8300 (details below). The merge-ready restriction set is:
+
+* P-only loop, no velocity feedforward;
+* fixed Kp = former code 1 (error clamp ±32, `<< 9`);
+* fixed velocity ceiling `vmax = 8191`; acceleration still `PLAN`-selected;
+* reserved: `CONTROL[3:2]` (gain) and `PLAN[2:0]` (velocity).
+
+Treat this branch as the area target for the stack; the earlier branches need
+the same final RTL before the stack is merge-ready.
+
 ## Local area (same flow as `scripts/measure_gf180_area.py`)
 
 | piece | before (`1547004`) | after | delta |
@@ -20,9 +34,10 @@ fixed 8191 of the underlying experiment.
 | `pi_p_controller` | 7,540.5 | 4,664.8 | −2,875.7 |
 | sequential area (top) | 18,178.5 | 17,583.6 | −594.9 |
 
-Using the q13 CI factor (`total/local = 1.18694`, core 51,966.97 µm²) this is
-**82.9 % utilisation**, down from 91.9 %. The 80 % line is 35,026 µm², so about
-**1.3 k** is still missing.
+Using the q13 CI factor (`total/local = 1.18694`, core 51,966.97 µm²) this
+projected **82.9 % utilisation**, down from 91.9 %. CI then confirmed the fit at
+0.8300 minimum feasible density; the 80 % local line is 35,026 µm², so the
+remaining local gap is about **1.3 k** but is no longer a tapeout blocker.
 
 ## Control impact
 

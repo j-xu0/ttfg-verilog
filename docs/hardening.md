@@ -44,10 +44,28 @@ size and estimated headroom, unchanged clock constraint, and diff formatting.
 RTL suites already passed on the identical logic. GitHub's GDS workflow must
 rerun hardening, precheck, and gate-level tests against the new allocation.
 
-## Current mandatory 1x1 implementation
+## Successful 1x1 implementation
 
-`info.yaml` is restored to 1x1. The new serial/LUT optimizations cut controlled
-GF180 cell area 58.7%, to 58,174.995 um², but that still exceeds the 51,966.970 um²
-core. See [the current area results](area-optimization.md). No successful 3x2
-run or generic RTL check establishes 1x1 fit. Further architectural reduction
-and a passing 1x1 physical run are still required.
+`info.yaml` remains 1x1. The first clean 1x1 result is CI run
+[`44132561693`](https://github.com/j-xu0/ttfg-verilog/actions/runs/44132561693)
+on branch `exp/p-only-fixed-kp` (commit `2ed4e39`):
+
+| Metric | Value |
+| --- | ---: |
+| GPL original cell area | 41,578.41 um² |
+| Final placement area (+3.21% routability inflation) | 42,913.48 um² |
+| Available free area | 50,439.11 um² |
+| Minimum feasible density | 0.8300 |
+| DRT violations | 495 -> 177 -> 130 -> 4 -> 1 -> 1 -> **0** |
+| GDS build / precheck | **pass / pass** |
+
+The restriction set that closed the gap is documented in
+[`p-only-fixed-kp.md`](p-only-fixed-kp.md): remove velocity feedforward, fix Kp
+at the former code 1, and fix the velocity ceiling at 8191. Acceleration remains
+`PLAN`-selected. The earlier serial/LUT work in
+[`area-optimization.md`](area-optimization.md) provided the base reduction but
+was not sufficient by itself.
+
+Gate-level simulation still needs testbench work: `uo_out` can briefly be X and
+the motor model calls `int(dut.uo_out.value)`. This is not a placement, routing,
+or precheck failure.

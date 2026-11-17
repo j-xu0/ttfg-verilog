@@ -4,6 +4,11 @@ Date: 2026-11-12. Branch `tmp/q8-area-test`. Supersedes the PI-area conclusion
 in [`q12-handoff.md`](q12-handoff.md) §7. Read Q12 for the exact-Q11 brake
 algorithm and the Q12 test map.
 
+> **Update 2026-11-17:** the 1x1 fit is closed on `exp/p-only-fixed-kp` by
+> dropping feedforward and fixing Kp and `vmax`. See
+> [`p-only-fixed-kp.md`](p-only-fixed-kp.md). The "P-only is not enough by
+> itself" conclusion below applies to the spec-preserving variant only.
+
 ## 1. Executive summary
 
 The integrator, Ki field and anti-windup path are gone. The proportional

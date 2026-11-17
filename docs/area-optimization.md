@@ -1,8 +1,10 @@
 # Mandatory 1x1 area optimization
 
-The allocation is restored to **1x1**. No host settings or control features are
-removed, but **the optimized design still does not fit**. These changes are an
-area-reduction milestone, not a completed one-tile implementation.
+The allocation is **1x1**, and the current P-only fixed-Kp tip now hardens on it
+(CI run `44132561693`, 0 DRT violations, precheck pass). The serial/LUT numbers
+below are the earlier feature-preserving milestone; they cut area substantially
+but did not fit by themselves. The final restriction set is in
+[`p-only-fixed-kp.md`](p-only-fixed-kp.md).
 
 ## Controlled GF180 mapping
 
@@ -36,6 +38,9 @@ experiments. CI on the previous `b6c5a90` source confirmed 165.870% placement
 utilization (`GPL-0301`); these new local measurements are not a physical fit.
 
 ## Implemented changes
+
+> Items 2–3 describe the interim PI-era engine. The PI stage and velocity
+> feedforward were later removed by the final P-only restriction set.
 
 1. **64-profile stopping lookup.** The integrated planner no longer calculates
    cap stopping distances through a general divider and serial multipliers.
@@ -83,10 +88,9 @@ split-phase and boundary configurations. External motor-model tests retain
 missed-step correction, reverse commands, shaft disturbances, fault/disable/reset,
 range faults, settling, the 10 kHz ceiling and lowest motion settings.
 
-Shared storage/arithmetic is now implemented, but it does not close the 1x1 gap.
-The remaining persistent registers have overlapping lifetimes, limiting further
-direct sharing. A diagnostic one-constant replacement for the stopping
-ROM saved only about 2,737 um² in the earlier planner, so removing this table alone
-cannot close the gap. No larger tile, disabled check, reduced clock or feature
-removal is used to make this milestone appear to fit. Full 1x1 hardening must
-ultimately pass before the implementation is complete.
+The final 1x1 fit came from the P-only fixed-Kp restriction set on top of this
+shared arithmetic, not from further register sharing: drop velocity feedforward,
+fix Kp at the former code 1, and fix the velocity ceiling at 8191. CI run
+`44132561693` hardened and passed precheck at minimum feasible density 0.8300.
+See [`p-only-fixed-kp.md`](p-only-fixed-kp.md) and
+[`hardening.md`](hardening.md).

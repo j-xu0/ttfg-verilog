@@ -114,11 +114,12 @@ gain, position-range, or Q16 fractional-resolution setting is removed.
 ## Feedback arithmetic
 
 > **Current integrated engine (Q11, 1x1 area revision).** The physical design is
-> P-only: `reference_position[23:0]` is Q11, error is
-> `(reference[23:11] - measured) << 11`, Kp selects 1/8…1, and the command is
-> `feedforward + Kp*error` clamped to the profile velocity limit. The integrator,
-> Ki register and anti-windup path were removed. The Q16 PI description below is
-> retained for the standalone `pi_controller.v` reference and its unit tests.
+> P-only with a fixed gain: `reference_position[23:0]` is Q11, error is
+> `reference[23:11] - measured` clamped to ±32 and shifted left 9 (Kp = 0.25
+> steps/tick per count). There is no feedforward and no runtime Kp select; the
+> command is clamped to the fixed `vmax = 8191`. The integrator, Ki register and
+> anti-windup path were removed. The Q16 PI description below is retained for the
+> standalone `pi_controller.v` reference and its unit tests.
 
 ## PI arithmetic
 
@@ -182,8 +183,8 @@ check displacement, acceleration, saturation, exact landing, timing and rate cou
 Port-level motor tests model legal encoder feedback, dropped steps and disturbances.
 This idealized digital model does not establish real motor stability or tuning.
 
-Controlled full-top GF180 standard-cell synthesis measures 58,174.995 um²,
-2,372 cells and 353 flip-flops, a 58.7% area reduction from the original controller
-under the same local mapping flow. The mandatory 1x1 core is only 51,966.970 um²,
-so this is still over budget. No 1x1 fit, post-route timing or physical-signoff
-claim follows from these results. See `area-optimization.md`.
+The final P-only fixed-Kp variant **hardens on the 1x1 tile and passes precheck**
+(CI run `44132561693`: 0 DRT violations, minimum feasible density 0.8300; final
+placement area 42,913.48 um² against the 51,966.970 um² core). Post-route timing
+signoff and the gate-level test harness still need work. See
+[`p-only-fixed-kp.md`](p-only-fixed-kp.md) and `hardening.md`.
