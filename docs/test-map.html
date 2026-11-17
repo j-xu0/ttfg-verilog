@@ -195,28 +195,28 @@
 <div class="wrap">
 
   <h1>Functional Test Map — <code>tt_um_j_xu0_stepper</code></h1>
-  <p class="sub">How the verification suites map to the RTL, and how the 8 chip-level tests relate to unit/subsystem tests.</p>
+  <p class="sub">How the verification suites map to the RTL, and how the 9 chip-level tests relate to unit/subsystem tests.</p>
 
   <section class="panel">
     <div class="stats">
       <div class="stat blue">
-        <div class="num">25</div>
-        <div class="lbl">module / subsystem cocotb runs<br><span class="tiny">7 suites, parameterized configs</span></div>
+        <div class="num">23</div>
+        <div class="lbl">module simulation configurations<br><span class="tiny">7 suites, parameterized configs</span></div>
       </div>
       <div class="stat green">
-        <div class="num">8</div>
+        <div class="num">9</div>
         <div class="lbl">chip-level integration tests<br><span class="tiny">through <code>tb.v</code> + external pins</span></div>
       </div>
       <div class="stat amber">
         <div class="num">33</div>
-        <div class="lbl">total simulation runs<br><span class="tiny">25 block + 8 chip</span></div>
+        <div class="lbl">total test cases<br><span class="tiny">23 block + 9 chip + 1 generator</span></div>
       </div>
       <div class="stat">
         <div class="num">1</div>
         <div class="lbl">pure-Python generator check<br><span class="tiny"><code>plan_lut.vh</code> reproducibility</span></div>
       </div>
     </div>
-    <p class="tiny" style="margin-top:12px">One “run” = one cocotb test function in one compiled parameter configuration. Internal directed cases are far more numerous (e.g. all 64 profiles, 16 gain pairs, 1,200 randomized PI steps).</p>
+    <p class="tiny" style="margin-top:12px">Each module configuration is one pytest runner case and may execute multiple cocotb functions. Integration counts individual cocotb cases. Internal directed cases are far more numerous (e.g. all acceleration profiles, reserved gain codes, 1,200 randomized PI steps).</p>
   </section>
 
   <section class="panel">
@@ -262,9 +262,9 @@
 
         <div class="branch"><div class="card">
           <div class="mod">shared_motion_controller.v</div>
-          <div class="role">Planner + PI + shared serial ALU / storage</div>
+          <div class="role">motion_engine.v serial planner + pi_p_controller.v fixed-gain feedback</div>
           <div class="suite">test_shared_controller.py</div>
-          <div class="runs">4 runs</div>
+          <div class="runs">2 configurations</div>
         </div></div>
 
         <div class="branch"><div class="card">
@@ -299,8 +299,8 @@
   <section class="panel">
     <div class="panel-head">
       <div>
-        <h2>2 · Simulation runs by suite</h2>
-        <p>Relative volume of cocotb simulation runs. Bar is scaled to the 10-run STEP/DIR suite.</p>
+        <h2>2 · Module configurations and integration cases</h2>
+        <p>Module configurations and individual integration cases. Bar is scaled to the 10-run STEP/DIR suite.</p>
       </div>
     </div>
 
@@ -310,8 +310,8 @@
       <div class="bar-count">10</div>
 
       <div class="bar-label">shared_controller</div>
-      <div class="bar-track"><div class="bar-fill" style="width:40%"></div></div>
-      <div class="bar-count">4</div>
+      <div class="bar-track"><div class="bar-fill" style="width:20%"></div></div>
+      <div class="bar-count">2</div>
 
       <div class="bar-label">timebase</div>
       <div class="bar-track"><div class="bar-fill" style="width:30%"></div></div>
@@ -335,8 +335,8 @@
       <div class="bar-count">1</div>
 
       <div class="bar-label" style="padding-top:8px;border-top:1px solid var(--line)">chip integration</div>
-      <div class="bar-track" style="margin-top:8px;border-top:1px solid var(--line)"><div class="bar-fill e2e" style="width:80%"></div></div>
-      <div class="bar-count" style="padding-top:8px;border-top:1px solid var(--line)">8</div>
+      <div class="bar-track" style="margin-top:8px;border-top:1px solid var(--line)"><div class="bar-fill e2e" style="width:90%"></div></div>
+      <div class="bar-count" style="padding-top:8px;border-top:1px solid var(--line)">9</div>
     </div>
   </section>
 
@@ -350,10 +350,10 @@
 
     <div class="e2e-wrap">
       <div class="tb-box">
-        <div class="big">8 tests</div>
+        <div class="big">9 tests</div>
         <div class="tiny" style="margin:4px 0 10px">one build · 10 MHz clk · 500 kHz SPI</div>
         <div style="display:grid;gap:6px;font-size:12px">
-          <div><span class="tag black">5</span> black-box pin tests</div>
+          <div><span class="tag black">6</span> black-box pin tests</div>
           <div><span class="tag white">3</span> white-box hierarchy</div>
         </div>
         <p class="tiny" style="margin-top:10px">White-box tests are skipped with <code>GATES=yes</code>. Black-box tests are gate-level-ready.</p>
@@ -361,6 +361,7 @@
 
       <div>
         <div class="e2e-list">
+          <div class="test-chip"><span class="name">spi_init_short_move</span><span class="tag black">pin</span></div>
           <div class="test-chip"><span class="name">ports_status_and_reset</span><span class="tag black">pin</span></div>
           <div class="test-chip"><span class="name">closed_loop_moves_and_disturbance</span><span class="tag black">pin</span></div>
           <div class="test-chip"><span class="name">motion_abort_and_fault</span><span class="tag black">pin</span></div>
@@ -370,7 +371,7 @@
           <div class="test-chip"><span class="name">serial_reference_sampling</span><span class="tag white">white-box</span></div>
           <div class="test-chip"><span class="name">shared_engine_abort_phases</span><span class="tag white">white-box</span></div>
         </div>
-        <p class="tiny e2e-note">Coverage: pins/status/reset · dropped step + shaft disturbance · new/same TARGET · abort/fault · both signed range boundaries · 10 kHz pulse ceiling · lowest PLAN codes · serial sampling before workspace reuse · disable/reset during PI and planner phases.</p>
+        <p class="tiny e2e-note">Coverage: pins/status/reset · dropped step + shaft disturbance · new/same TARGET · abort/fault · both signed range boundaries · 4 kHz pulse ceiling · lowest PLAN codes · serial sampling before workspace reuse · disable/reset during feedback publication and planner work.</p>
       </div>
     </div>
   </section>
@@ -384,7 +385,7 @@
     <div class="status">
       <div class="box">
         <b class="ok">Strong: module/subsystem correctness</b>
-        <span class="tiny">Independent Python oracles compare command, integral, trajectory, pulse phase, register state. Directed corners + seeded random inputs. Subsystem suite checks exact shared-engine lifecycle and cancellation.</span>
+        <span class="tiny">Independent Python oracles compare command, integral, trajectory, pulse phase, register state. Directed corners + seeded random inputs. Subsystem suite checks planner lifecycle, fixed-gain feedback and cancellation.</span>
       </div>
       <div class="box">
         <b class="warn">Moderate: chip-level e2e</b>
@@ -395,7 +396,7 @@
         <span class="tiny">No gate-level run of the full chip (1x1 hardening fails on area), no formal properties/equivalence, no functional coverage metric, no real motor/driver/board validation, no SPI majority voting or glitch filtering.</span>
       </div>
     </div>
-    <p class="tiny" style="margin-top:12px"><b>Status:</b> counts reflect the Q16 shared-engine baseline, where module suites and the 8 integration tests pass. The checked-out <code>tmp/q8-area-test</code> branch is a temporary Q8 experiment that intentionally breaks low-acceleration profiles and fails its test run; it is not a valid baseline.</p>
+    <p class="tiny" style="margin-top:12px"><b>Scope:</b> counts describe the Q11 fixed-Kp design: 23 block simulation configurations, nine integration cases and one Python LUT-generation check. These are coverage counts, not a new test or physical-signoff result.</p>
   </section>
 
 </div>

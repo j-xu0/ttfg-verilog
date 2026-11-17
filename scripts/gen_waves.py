@@ -13,7 +13,7 @@ Usage:
     python3 scripts/gen_waves.py --keep-build    # keep pytest build trees
 
 The full run takes roughly 7 minutes: the shared-controller suite alone runs a
-768-point cancellation sweep in two configurations (~2 minutes), and the
+feedback cancellation sweep in two configurations (~2 minutes), and the
 chip-level integration run takes ~4 minutes.  The chip-level phase also reruns
 one directed testcase (`spi_init_short_move`) for a short, easy-to-read trace.
 """
@@ -50,7 +50,7 @@ DIRECTED_E2E = {
 
 
 def label_for(name: str, item: str) -> str:
-    """Return the stable, human-readable label used in test/waves/README.md."""
+    """Return the stable, human-readable label used for generated waveform files."""
     if name in ("spi", "encoder"):
         return name
     if name == "timebase":
@@ -201,7 +201,9 @@ def main() -> int:
             failures.append("e2e")
 
     write_manifest()
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "gen_wave_saves.py")], cwd=ROOT)
+    saves = subprocess.run([sys.executable, str(ROOT / "scripts" / "gen_wave_saves.py")], cwd=ROOT)
+    if saves.returncode != 0:
+        failures.append("waveform save files")
     if BUILD.exists() and not args.keep_build:
         shutil.rmtree(BUILD, ignore_errors=True)
 

@@ -1,26 +1,26 @@
 # Shared planner/PI controller
 
 > **Update 2026-11-17:** this document records the shared-engine milestone. The
-> later P-only fixed-Kp restriction set hardens on 1x1; see
-> [`p-only-fixed-kp.md`](p-only-fixed-kp.md).
+> later P-only fixed-Kp restriction set hardens on 1x1; see [the area budget](area.md).
+>
+> **Shipped decomposition.** `shared_motion_controller.v` is now a thin wrapper
+> composing `motion_engine.v` (bit-serial planner, owns the whole serial ALU) and
+> `pi_p_controller.v` (single-cycle fixed-gain P). The schedule and register
+> lifetimes below describe the *PI-era* engine where both calculations shared the
+> accumulator; that is the 58,175 um² milestone, not the current datapath. What
+> still holds for the shipped design: reference/velocity are workspace while
+> `calculating=1`, ticks during work are ignored, and the cancellation/abort
+> contract is unchanged.
 
 ## Before and after
 
 The previous integrated design used independently scheduled planner and PI
-engines. Its GF180 mapped area was 61,318.5216 um² with 392 flip-flops.
-
-`shared_motion_controller.v` now executes PI and the planner with one FSM,
-30-bit arithmetic/error register, bit counter, carry state and serial adder.
-Initial position subtraction also uses that adder. The integrated mapped area
-is **58,174.9952 um² with 353 flip-flops**, a **5.1% area reduction**. Selection
-and scheduling logic offset part of the storage saving; standalone block sums
-are not a substitute for this full-top measurement.
-
-**This milestone did not fit 1x1 by itself.** Raw cells occupied 111.9% of the
-51,966.970 um² core before physical headroom. The later P-only fixed-Kp
-restriction set closed the gap (CI run `44132561693`, 0 DRT violations). No host
-feature, position range, driver timing or pin function was removed. STEP
-generation, encoder counting and SPI remain independent of the scheduled engine.
+engines (61,318.5 um², 392 flip-flops). `shared_motion_controller.v` executes
+both with one FSM, 30-bit arithmetic/error register, bit counter, carry state
+and serial adder; initial position subtraction uses that adder too. Result:
+**58,175.0 um², 353 flip-flops, −5.1 %**. Selection and scheduling logic offset
+part of the storage saving; standalone block sums are not a substitute for a
+full-top measurement. Full ledger: [area budget](area.md).
 
 ## Schedule and register lifetimes
 
@@ -57,18 +57,37 @@ encoder feedback at each tick as well as the measured origin at launch.
 
 ## Alternatives considered
 
-A symmetric mirror-rule planner (speed up for the first half of the move,
-mirror the distance when slowing down) was prototyped on this shared ALU in
-branch `nick/mirror-shared-engine`, reusing the PI schedule, handshake and
-abort semantics unchanged. It is functionally verified (shared numerical
-contract, cancellation sweep, full integration suite) and deletes the
-64-entry stopping LUT, but the travelled/total/turn state and extra serial
-states outweigh that saving: 63,641 um2 vs 59,393 um2 full-top in the same
-controlled GF180 flow (+7.2%). The standalone parallel mirror planner keeps
-its advantage (about -34% vs the parallel stopping planner); the saving does
-not survive serialization, where the stopping schedule's recompute-from-
-reference style uses less persistent state. Kept here as the stopping-rule
-engine for the 1x1 goal.
+A mirror-rule planner was prototyped on this shared ALU (branch
+`nick/mirror-shared-engine`), reusing the PI schedule, handshake and abort
+semantics unchanged. It is functionally verified and deletes the 64-entry
+stopping LUT, but costs **+7.2 %** (63,641 vs 59,393 um² same flow): the
+travelled/total/turn state and extra serial states outweigh the LUT. It keeps
+its ~−34 % advantage as a standalone parallel planner. Do not retry; details in
+[the area budget](area.md#do-not-retry).
+
+## Engineering gotchas
+
+These cost real time; they are properties of this code, not history.
+
+* **`src/shared_motion_controller.v`, `src/motion_engine.v`,
+  `src/pi_p_controller.v` and `test/test_shared_controller.py` are CRLF files.**
+  Keep the line endings when rewriting them.
+* **Concat arity bugs are silent.** A mismatched operand list in a sum is
+  legal Verilog and shifts a bit position. Add an elaboration-time assert or
+  run a lint pass if you touch operand lists.
+* **Rotating-register taps must read bit 0** of the rotating field.
+* **`work` is a latch in the reference `pi_controller.v`, and must stay one.**
+  The oracle injects a mid-calculation `tick` and a changed `start_position`, so
+  the measured sample has to be latched at the acceptance edge. Replacing it
+  with the live `position` input breaks the disturbance contract.
+* **`src/plan_lut.vh` is generated** by `scripts/generate_plan_lut.py`; its
+  stopping table serves only the standalone reference planners.
+* The step generator is parameter-driven (`MAX_STEP_HZ 4000` → `MAX_COMMAND
+  8192`, `PHASE_BITS 25` with the split-phase scheme). Its `command_limited`
+  output is provably dead at the default parameters, worth ~40 um².
+* Cancelling PI mid-pass must not lose the pending planner advance; the test
+  sweeps all 96 offsets. Re-architecting PI means rewriting that sweep for the
+  new contract, not deleting the coverage.
 
 ## Implementation warnings
 
@@ -114,5 +133,4 @@ checks immediate pin inhibition, and verifies no automatic restart.
 
 Full-design synthesis checks and controlled GF180 mapping are separate from
 placement, routing, STA, gate-level simulation and physical signoff. The 1x1
-allocation and its hardening check remain enabled; the current area shortfall
-must not be bypassed.
+allocation and its hardening check remain enabled and pass; do not bypass them.

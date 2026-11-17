@@ -14,12 +14,15 @@ missed steps and disturbances, and report busy/settled/fault status.
 
 **The 1x1 tapeout build now hardens and passes precheck** (CI run
 `44132561693`: 0 DRT violations, minimum feasible density 0.8300). Post-layout
-timing signoff, gate-level test-harness X handling, and hardware tuning remain.
+timing signoff, gate-level harness X handling (`2fa46ad` stops the X at source in
+the planner bit index; the bench still needs a guard), and hardware tuning remain.
 
 - [Interface, pinout, and timing](docs/info.md)
 - [Implementation steps and unresolved proposal details](docs/implementation.md)
+- [The motion-control contract](docs/motion-planning.md)
+- [Area budget, measurement discipline, and rejected alternatives](docs/area.md)
 - [Running the tests](test/README.md)
-- [Understanding the waveforms and waveform tooling](docs/waveforms.md)
+- [Generating and viewing waveforms](test/README.md#waveforms)
 
 The top module is `tt_um_j_xu0_stepper`. The GF180 build uses `gf180mcuD` and the
 repository's existing `ttgf26a` workflow. The system clock target is **10 MHz**;
@@ -28,9 +31,11 @@ repository's existing `ttgf26a` workflow. The system clock target is **10 MHz**;
 **The mandatory allocation is 1x1 and the current tip meets it.** The fit uses
 the P-only fixed-Kp restriction set: no velocity feedforward, fixed Kp (former
 code 1), and a fixed 8191 velocity ceiling. The earlier 58,175 um² design needed
-those cuts; see [the optimization results](docs/area-optimization.md),
-[the P-only restriction note](docs/p-only-fixed-kp.md), and
-[the hardening history](docs/hardening.md).
+those cuts; the full ledger, measurement caveats and the list of approaches that
+were measured and rejected are in [the area budget](docs/area.md).
+
+The open PR stack is not merge-ready: #8 is a draft, the tip branch has no PR, and
+only the tip may claim 1x1 fit. Trim the area-history PR last.
 
 With Python, Icarus Verilog, and make installed, run from the repository root:
 
