@@ -23,8 +23,10 @@ module pi_p_controller (
     wire signed [15:0] limit = {3'b0, vmax};
     wire over = total > limit;
     wire under = total < -limit;
-    always @(posedge clk) begin
-        if (!rst_n || !enable || clear) begin
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            velocity_command <= 0; saturated <= 0;
+        end else if (!enable || clear) begin
             velocity_command <= 0; saturated <= 0;
         end else if (accept) begin
             velocity_command <= over ? limit[13:0] :

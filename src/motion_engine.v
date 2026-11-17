@@ -128,7 +128,7 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
         end
     endtask
 
-    always @(posedge clk) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             reference_position <= 0; speed <= 0; planner_busy <= 0; planner_done <= 0;
             latched_profile <= 0; latched_goal <= 0; negative <= 0;
