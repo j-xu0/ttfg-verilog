@@ -17,6 +17,9 @@ async def reset(dut):
     dut.sclk.value = 0
     dut.mosi.value = 0
     dut.busy.value = 0
+    dut.fault_code.value = 0
+    dut.fault_event.value = 0
+    dut.motion_disabled.value = 1
     dut.fault.value = 0
     dut.at_target.value = 0
     dut.rst_n.value = 0
@@ -188,3 +191,42 @@ def test_spi(tmp_path):
         timescale=("1ns", "1ps"),
     )
     runner.test(hdl_toplevel="stepper_spi", test_module="test_spi")
+
+
+@cocotb.test()
+async def recovery_commands(dut):
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+    await reset(dut)
+
+    async def transaction(word, count=16, event=False):
+        await begin(dut)
+        reply = await bits(dut, word, count)
+        if event:
+            dut.fault_event.value = 1
+            await cycles(dut)
+            dut.fault_event.value = 0
+        dut.cs_n.value = 1
+        clears = zeros = rejects = 0
+        for _ in range(8):
+            await cycles(dut)
+            clears += int(dut.fault_clear_pulse.value)
+            zeros += int(dut.zero_position_pulse.value)
+            rejects += int(dut.reject_pulse.value)
+        return reply, clears, zeros, rejects
+
+    dut.fault.value = 1
+    dut.fault_code.value = 3
+    assert await transaction(0xC002) == (0x1003, 0, 0, 0)
+    assert await transaction(0, count=15) == (0x801, 0, 0, 1)
+    assert await transaction(0, event=True) == (0x1003, 0, 0, 0)
+    assert await transaction(0) == (0x1003, 1, 0, 0)
+    dut.busy.value = 1
+    assert await transaction(0) == (0x5003, 1, 0, 0)
+    assert await transaction(0xE000) == (0x5003, 0, 0, 1)
+    dut.busy.value = 0
+    dut.motion_disabled.value = 0
+    assert await transaction(0xE000) == (0x1003, 0, 0, 1)
+    dut.motion_disabled.value = 1
+    assert await transaction(0xE001) == (0x1003, 0, 0, 1)
+    assert await transaction(0xE000) == (0x1003, 0, 1, 0)
+    assert int(dut.target.value) == 0

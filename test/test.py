@@ -73,7 +73,7 @@ async def ports_status_and_reset(dut):
     set_input(dut, 4, 1)
     await Timer(1000, unit="ns")
     assert int(dut.uo_out.value) == 0x20
-    assert await spi_frame(dut, 0) == 0x1000
+    assert await spi_frame(dut, 0) == 0x1001
 
     dut.ena.value = 0
     await Timer(1000, unit="ns")
@@ -81,7 +81,7 @@ async def ports_status_and_reset(dut):
     assert await spi_frame(dut, 0) == 0
     dut.ena.value = 1
     await Timer(1000, unit="ns")
-    assert int(dut.uo_out.value) == 0x20
+    assert int(dut.uo_out.value) == 0
 
     # Assert reset away from a clock edge; fault disappears immediately.
     await FallingEdge(dut.clk)
@@ -242,10 +242,12 @@ async def motion_abort_and_fault(dut):
     set_input(dut, 4, 1)
     await Timer(1, unit="us")
     assert int(dut.uo_out.value) & 0x27 == 0x20
-    assert await spi_frame(dut, 0) == 0x1000
+    assert await spi_frame(dut, 0) == 0x1001
+    await Timer(2, unit="us")
+    assert int(dut.uo_out.value) & 0x3F == 0
     await spi_frame(dut, 0x8001)
-    await Timer(2, unit="ms")
-    assert int(dut.uo_out.value) & 0x3F == 0x20
+    await Timer(2, unit="us")
+    assert int(dut.uo_out.value) & 8
     dut.rst_n.value = 0
     await Timer(1, unit="us")
     assert int(dut.uo_out.value) == 0
@@ -265,7 +267,7 @@ async def absolute_encoder_range_fault(dut):
         set_input(dut, 4, phase & 1)
         await Timer(1, unit="us")
     assert int(dut.uo_out.value) == 0x20
-    assert await spi_frame(dut, 0) == 0x1000
+    assert await spi_frame(dut, 0) == 0x1002
 
     # Negative endpoint itself is valid; one further decrement must fault.
     dut.rst_n.value = 0
@@ -441,3 +443,36 @@ async def spi_init_short_move(dut):
     middle = min(range(len(gaps)), key=gaps.__getitem__)
     assert 0 < middle < len(gaps) - 1, f"no accel/decel split: {gaps}"
     assert gaps[0] > gaps[middle] and gaps[-1] > gaps[middle], gaps
+
+
+@cocotb.test()
+async def fault_acknowledge_and_zero_position(dut):
+    await initialize(dut)
+    for phase in (1, 3, 2, 0):
+        set_input(dut, 3, phase >> 1)
+        set_input(dut, 4, phase & 1)
+        await Timer(1, unit="us")
+    set_input(dut, 3, 1)
+    set_input(dut, 4, 1)
+    await Timer(1, unit="us")
+    # Writes and truncated reads cannot acknowledge. Fault report is bit-coded.
+    assert await spi_frame(dut, 0xC001) == 0x1001
+    await spi_frame(dut, 0, count=15)
+    assert int(dut.uo_out.value) & 0x20
+    assert await spi_frame(dut, 0) == 0x1001
+    assert not int(dut.uo_out.value) & 0x20
+    # Fault acknowledgement preserves the four legal counts.
+    set_input(dut, 5, 1)
+    await spi_frame(dut, 0x8004)
+    await wait_settled(dut)
+    # Zero is rejected while enabled, even if settled.
+    await spi_frame(dut, 0xE000)
+    assert await spi_frame(dut, 0) == 0x2000
+    set_input(dut, 5, 0)
+    await Timer(1, unit="us")
+    await spi_frame(dut, 0xE000)
+    set_input(dut, 5, 1)
+    await Timer(1, unit="us")
+    assert int(dut.uo_out.value) & 0x1F == 0
+    await spi_frame(dut, 0x8000)
+    await wait_settled(dut)

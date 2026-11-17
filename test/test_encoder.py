@@ -25,6 +25,8 @@ async def set_phase(dut, phase):
 
 
 async def reset(dut, phase=0):
+    dut.clear_fault.value = 0
+    dut.zero_position.value = 0
     dut.rst_n.value = 0
     dut.a.value = phase >> 1
     dut.b.value = phase & 1
@@ -75,6 +77,19 @@ async def quadrature_contract(dut):
         await tick(dut, 10)
         assert position(dut) == 1
         assert int(dut.fault.value) == 1
+
+    # Clear preserves position; zeroing establishes a new stationary origin.
+    dut.clear_fault.value = 1
+    await tick(dut)
+    dut.clear_fault.value = 0
+    assert position(dut) == 1
+    assert int(dut.fault.value) == 0
+    dut.zero_position.value = 1
+    await tick(dut)
+    dut.zero_position.value = 0
+    await tick(dut, 5)
+    assert position(dut) == 0
+    assert int(dut.fault.value) == 0
 
     # Check each edge across the signed boundary, then reverse across it.
     await reset(dut)
