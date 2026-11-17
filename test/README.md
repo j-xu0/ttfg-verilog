@@ -80,5 +80,6 @@ python3 scripts/measure_gf180_area.py --lib /path/to/gf180.lib --output /tmp/ste
 
 The script stores its synthesis commands, log, mapped netlist and area JSON;
 results include the Liberty and source hashes. It does not perform placement,
-routing, STA, or signoff. Current controlled full-top area is 58,174.995 um² and
-still exceeds 1x1; see `docs/area-optimization.md`.
+routing, STA, or signoff. The current tip measures 36.3 k um² local and fits 1x1
+(42,913 um² final placement); see [the area budget](../docs/area.md) for the
+ledger and the measurement caveats that make small deltas meaningless.

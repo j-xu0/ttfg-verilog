@@ -120,8 +120,8 @@ All functional blocks now feed observable motion/status outputs. The current
 P-only fixed-Kp tip **hardens on the 1x1 tile and passes precheck** (CI run
 `44132561693`: 0 DRT violations, minimum feasible density 0.8300). The measured
 cell area is 41,578 um² before routability inflation, 42,913 um² final, against
-the 51,967 um² core. See [`p-only-fixed-kp.md`](p-only-fixed-kp.md) and
-[`hardening.md`](hardening.md).
+the 51,967 um² core. See [the area budget](area.md) for the restriction set,
+ledger and rejected alternatives.
 
 ## How to test
 

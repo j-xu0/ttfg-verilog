@@ -36,7 +36,12 @@ correction against the retained final reference without a new trajectory.
 
 ## Numerical format and lookup tables
 
-The shared controller uses fixed Q16 arithmetic:
+The integrated controller uses fixed **Q11** arithmetic; see
+[Integrated Q11 numeric format](#integrated-q11-numeric-format) below. The tables
+here give the host-visible `PLAN` code → rate mapping, expressed in Q16 units
+because the standalone reference planners use Q16.
+
+The shared controller uses, for the Q16 reference planners:
 
 - Position reference: signed 29-bit integer position with 16 fractional bits.
 - Reference and commanded velocity: signed 21-bit steps/control-tick with 16
@@ -67,6 +72,57 @@ is about 503.54 steps/s². Q16 resolves 15.26 steps/s², so the low acceleration
 range is representable. The shorter proposal's /8192 loop and 100 steps/s² lower
 endpoint are not selected. No separate PWM output is generated; PI commands a
 signed step rate for an external STEP/DIR power driver.
+
+## Integrated Q11 numeric format
+
+This is the physical design's format. Control tick is 1 kHz; rate units are
+steps/tick, where one step is one STEP pulse and one x4 encoder transition.
+Velocity ceiling is 4,000 steps/s; position range is ±4,095 steps.
+
+| Field | Signed | Bits | Int | Frac | Raw range | Physical range | LSB |
+| --- | --- | ---: | ---: | ---: | --- | --- | --- |
+| `reference_velocity` | yes | `[13:0]` | 2 | 11 | −8,191 … +8,191 | ±3.9995 steps/tick = ±3,999 steps/s | 0.4883 steps/s |
+| `speed_limit` | no | `[12:0]` | 2 | 11 | 0 … 8,191 | 0 … 3.9995 steps/tick | 0.4883 steps/s |
+| `acceleration` | no | `[10:0]` | 0 | 11 | 0 … 2,047 | 0 … 0.99951 steps/tick² = 999,512 steps/s² | 488.3 steps/s² |
+| `target` / `start_position` | yes | `[12:0]` | 12 | 0 | −4,096 … +4,095 | ±4,095 steps | 1 step |
+| `reference_position`, `remaining`, `stopping` | yes / no | `[23:0]` | 13 | 11 | ±8,388,608 | covers ±4,096 targets | 1/2048 step |
+
+All three rate fields share the Q11 scale, so `v += a` is a direct add and
+`pos += v` is an exact Q11 add: no shift, no truncation. Acceleration has no
+integer bits, valid only while the ceiling stays below ~8,600 steps/s (a
+16,000 steps/s ceiling would need `[11:0]`). The 13-bit signed integer part of
+the 24-bit reference covers the whole legal position range and doubles as
+scratch for the signed remaining distance during the brake decision.
+
+**Current 1x1 restriction.** `vmax` is fixed at 8191; acceleration remains
+`PLAN[5:3]`-selected; `PLAN[2:0]` and `CONTROL[3:2]` are reserved.
+
+The brake sum is maintained **exactly** in Q11 as `S(s) = s + S(s-a)`:
+accelerating to `s'` adds `s'`, holding at `s` leaves `S` unchanged, decelerating
+subtracts the current `s`. A candidate speed is accepted only when its exact `S`
+fits inside the exact remaining distance, so the reference cannot overshoot and
+there is no stopping lookup table or sentinel in the integrated engine —
+unreachable profile pairs are simply never accepted. (The generated 64-entry
+`plan_lut.vh` table is used only by the standalone reference planners.) Within
+one step of the target the reference snaps exactly onto it, so resting error is
+zero: sub-step residue is discarded, not accumulated.
+
+Engine storage: reference position 24, brake sum 24, speed 13, accumulator 25,
+sampled measured/P command 14 bits.
+
+Feedback is **P-only with a fixed gain**: error is `reference[23:11] - measured`
+(integer counts), clamped to ±32, scaled by `2^9` (Kp = 0.25 steps/tick per
+count = 250 steps/s per count). No feedforward, no runtime Kp register, no
+integrator, no Ki, no anti-windup. The command is clamped to the fixed 8191
+ceiling.
+
+Control consequence: feedforward is a tracking term, not a loop-dynamics term.
+The plant is a velocity command into a position integrator, so this is a type-1
+loop with zero steady-state error to a position step. The cost is a steady
+cruise lag `e_ss = v_ref / Kp` — up to 16 counts at the 4 steps/tick ceiling —
+and weaker rejection of a constant disturbance. The fixed Kp gives a discrete
+loop gain `Kp·T = 0.25`, comfortably damped; the retired `kp=3` code was
+deadbeat and should not be reintroduced.
 
 ## Timebase and trajectory
 
@@ -187,4 +243,4 @@ The final P-only fixed-Kp variant **hardens on the 1x1 tile and passes precheck*
 (CI run `44132561693`: 0 DRT violations, minimum feasible density 0.8300; final
 placement area 42,913.48 um² against the 51,966.970 um² core). Post-route timing
 signoff and the gate-level test harness still need work. See
-[`p-only-fixed-kp.md`](p-only-fixed-kp.md) and `hardening.md`.
+[the area budget](area.md).

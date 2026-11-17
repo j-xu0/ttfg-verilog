@@ -208,7 +208,8 @@ async def shared_numerical_contract(dut):
             kp = (index // 4 + code) % 4
             await h.tick(measured, kp)
             if not h.ref[2]:
-                # Integer-only finish: frac <1 step error accepted per numeric-spec.
+                # Integer-only finish: frac <1 step error accepted per
+                # docs/motion-planning.md (Q11 brake-sum landing).
                 assert h.ref[0] == target*2048 and h.ref[1] == 0, (h.ref, target)
                 # Disturbance recovery must retain the completed reference.
                 for offset in (-4096, 4095, target, target):

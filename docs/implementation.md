@@ -13,13 +13,12 @@ choices needed to make that foundation testable.
 | 5 | Fixed-point proportional feedback | Signed integer error, fixed Kp, command saturation | P-only fixed-gain in RTL (no feedforward, integrator or anti-windup) |
 | 6 | STEP/DIR/ENABLE generator | Pulse width/spacing, DIR setup/hold, disable and fault interlocks | Implemented in RTL |
 | 7 | Closed-loop integration | Motor/encoder model, forward/reverse targets, disturbances, settling | Implemented in RTL |
-| 8 | GF180 submission checks | Full-design synthesis, tile fit, STA, gate-level tests, precheck and physical verification | 1x1 GDS + precheck pass (run 44132561693); gate-level X handling pending |
+| 8 | GF180 submission checks | Full-design synthesis, tile fit, STA, gate-level tests, precheck and physical verification | 1x1 GDS + precheck pass (run 44132561693); gate-level X tracked by `2fa46ad`, post-route STA pending |
 
-Two subagents independently implemented steps 1 and 2 and their unit tests, then
-reviewed each other's modules. The main agent integrated the design and added
-port-level and RTL wiring tests. Review identified a reset-with-CS-low SPI bug;
-the implementation and regression now ensure only a fresh post-reset transaction
-can write.
+Steps 1 and 2 were built independently and cross-reviewed. Two bugs came out of
+that review and have regressions: a reset-with-CS-low SPI write (only a fresh
+post-reset transaction may write) and a new-TARGET race after a settled move
+(explicit commit priority).
 
 ## Implemented integration choices
 
@@ -27,12 +26,6 @@ The third implementation layer connects all functional blocks. The detailed
 proposal's 1 kHz loop and acceleration endpoints are used. Exact lookup tables,
 Q11 scaling, fixed-gain P ordering, STEP timing, and command/fault/settling semantics are
 specified in [`motion-planning.md`](motion-planning.md) and `info.md`.
-
-Three subagents implemented PI, pulse timing, and planner precision/serial
-arithmetic, with independent cross-review. Integration review found a new-TARGET
-race after a settled move; explicit commit priority and a regression fix it.
-The main agent added external motor/encoder-model tests for moves, missed steps,
-disturbances, aborts, and absolute-range faults.
 
 These are implementation choices where the proposals differ or omit details.
 Remaining hardware decisions are the actual driver IC/electrical timing,
@@ -67,9 +60,8 @@ acceleration profiles, driver timings, faults and settling remain supported.
 The final P-only fixed-Kp tip **hardens on the 1x1 tile and passes precheck**
 (CI run `44132561693`: 0 DRT violations, minimum feasible density 0.8300, final
 placement area 42,913.48 um² against the 51,967 um² core). See
-[`p-only-fixed-kp.md`](p-only-fixed-kp.md) and
-[`hardening.md`](hardening.md) for the restriction set and run log. Do not
-enlarge the tile to bypass the check.
+[the area budget](area.md) for the restriction set, ledger and rejected
+alternatives. Do not enlarge the tile to bypass the check.
 
 The [shared-controller implementation](shared-controller.md) documents scheduling,
 register lifetimes, cancellation cleanup and verification.
