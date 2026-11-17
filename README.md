@@ -2,6 +2,10 @@
 
 # Tiny Tapeout GF180 Stepper Motor Controller
 
+**Codename: TinyStep.** "TTS" was a placeholder; the chip's working name is now
+TinyStep. The module name and `info.yaml` title are unchanged for now, so the
+rename is a documentation-only change.
+
 A staged implementation of the ECE298A stepper-driver proposal. The controller
 receives signed target positions over SPI, plans trapezoidal motion, and uses
 quadrature feedback and a fixed-gain proportional (P) controller to drive an

@@ -1,4 +1,5 @@
 # Tiny Tapeout project information
+# Codename: TinyStep (formerly the "TTS" placeholder). See README.md.
 project:
   title:        "Closed-loop Stepper Controller"      # Project title
   author:       "Jason Xu"      # Your name
