@@ -60,13 +60,13 @@ async def reset(dut):
 
 
 def command(dut, value):
-    dut.velocity_command.value = value & ((1 << 21) - 1)
+    dut.velocity_command.value = value & ((1 << len(dut.velocity_command)) - 1)
 
 
 @cocotb.test()
 async def pulse_contract(dut):
     p = json.loads(os.environ["STEP_TEST_PARAMS"])
-    for velocity in (65536, -65536, 98305, -98305, -(1 << 20), (1 << 20)-1):
+    for velocity in (2048, -2048, 3073, -3073, -(1 << 13), (1 << 13)-1):
         await reset(dut)
         command(dut, velocity)
         monitor = Monitor(dut, p)
@@ -74,8 +74,8 @@ async def pulse_contract(dut):
         before = len(monitor.rises)
         await monitor.run(12000)
         observed = len(monitor.rises) - before
-        capped = min(abs(velocity), p["MAX_STEP_HZ"] * 65536 // p["CONTROL_HZ"])
-        expected = 12000 * capped * p["CONTROL_HZ"] / (p["CLOCK_HZ"] * 65536)
+        capped = min(abs(velocity), p["MAX_STEP_HZ"] * 2048 // p["CONTROL_HZ"])
+        expected = 12000 * capped * p["CONTROL_HZ"] / (p["CLOCK_HZ"] * 2048)
         assert abs(observed - expected) <= 1, (velocity, observed, expected)
         assert all(direction == (velocity > 0) for _, direction in monitor.rises)
         assert int(dut.rate_limited.value) == (abs(velocity) > capped)
@@ -83,14 +83,14 @@ async def pulse_contract(dut):
     # Reverse during an active pulse; every pulse must retain its direction,
     # and fall-to-direction and direction-to-rise gaps must satisfy the contract.
     await reset(dut)
-    command(dut, 655360)
+    command(dut, 8191)
     monitor = Monitor(dut, p)
     while not monitor.previous:
         await monitor.run(1)
-    command(dut, -655360)
+    command(dut, -8191)
     await monitor.run(250)
     assert any(direction == 0 for _, direction in monitor.rises)
-    command(dut, 98305)
+    command(dut, 3073)
     await monitor.run(600)
     assert monitor.rises[-1][1] == 1
 
@@ -101,7 +101,7 @@ async def pulse_contract(dut):
     before = len(monitor.rises)
     await monitor.run(500)
     assert len(monitor.rises) == before and not monitor.previous
-    command(dut, 65536)
+    command(dut, 2048)
     before = len(monitor.rises)
     await monitor.run(80)  # At 1kHz the DDS period is 100 clocks.
     assert len(monitor.rises) == before
@@ -112,7 +112,7 @@ async def pulse_contract(dut):
     # These explicit safety aborts are allowed to truncate an active pulse.
     for signal, value, restore in (("enable", 0, 1), ("fault", 1, 0), ("rst_n", 0, 1)):
         await reset(dut)
-        command(dut, 655360)
+        command(dut, 8191)
         for _ in range(100):
             if (await cycle(dut))[0]:
                 break
@@ -128,7 +128,7 @@ async def pulse_contract(dut):
         await monitor.run(100)
         assert not monitor.rises
         assert int(dut.driver_enable.value)
-        command(dut, -65536)
+        command(dut, -2048)
         await monitor.run(300)
         assert monitor.rises and monitor.rises[-1][1] == 0
 
@@ -137,7 +137,7 @@ async def pulse_contract(dut):
 def test_step_dir(tmp_path, single_cycle):
     from cocotb_tools.runner import get_runner
     root = Path(__file__).resolve().parents[1]
-    params = dict(CLOCK_HZ=100000, CONTROL_HZ=1000, MAX_STEP_HZ=10000,
+    params = dict(CLOCK_HZ=100000, CONTROL_HZ=1000, MAX_STEP_HZ=3000,
                   STEP_HIGH_CYCLES=1 if single_cycle else 3,
                   STEP_LOW_CYCLES=1 if single_cycle else 4,
                   DIR_SETUP_CYCLES=1 if single_cycle else 5,
@@ -166,7 +166,7 @@ class UnreducedNCO:
 
     def outputs(self, velocity, rst_n, enable, fault):
         active = bool(rst_n and enable and not fault)
-        clamp = abs(velocity) > 65536 * self.p["MAX_STEP_HZ"] // self.p["CONTROL_HZ"]
+        clamp = abs(velocity) > 2048 * self.p["MAX_STEP_HZ"] // self.p["CONTROL_HZ"]
         return (int(active and self.pulse), self.direction, int(active),
                 int(active and (clamp or self.timing_limited)))
 
@@ -198,11 +198,11 @@ class UnreducedNCO:
         elif old_dir < p["DIR_SETUP_CYCLES"] - 1 or old_enable < p["ENABLE_SETUP_CYCLES"] - 1:
             self.phase = 0
         else:
-            magnitude = min(abs(velocity), 65536 * p["MAX_STEP_HZ"] // p["CONTROL_HZ"])
+            magnitude = min(abs(velocity), 2048 * p["MAX_STEP_HZ"] // p["CONTROL_HZ"])
             # This intentionally retains the original unreduced multiplier and
             # threshold, never reading the optimized RTL's arithmetic constants.
             self.phase += magnitude * p["CONTROL_HZ"]
-            threshold = 65536 * p["CLOCK_HZ"]
+            threshold = 2048 * p["CLOCK_HZ"]
             if self.phase >= threshold:
                 self.phase -= threshold
                 if not old_pulse and old_low >= p["STEP_LOW_CYCLES"] - 1:
@@ -221,8 +221,8 @@ async def rate_demo(dut):
     train over exactly the same number of clocks.
     """
     p = json.loads(os.environ["STEP_TEST_PARAMS"])
-    # Ask the DUT for its implemented clamp rather than assuming the Q16 scale,
-    # so the demo also runs on the Q8 area-experiment variant.
+    # Ask the DUT for its implemented clamp rather than assuming the Q11 scale,
+    # so the demo also runs on the Q11 implementation.
     over_range = (1 << (len(dut.velocity_command) - 1)) - 1
     command(dut, over_range)
     await Timer(1, unit="ns")  # combinational probe, no clock edge
@@ -232,7 +232,9 @@ async def rate_demo(dut):
         dut._log.info("rate_demo: MAX_STEP_HZ too small for a contrast, skipping")
         return
     # Bound the wait: the low command is at most 8x the maximum step period.
-    patience = 16 * p["CLOCK_HZ"] // max(p["MAX_STEP_HZ"], 1) + 1000
+    patience = (4 * p["CLOCK_HZ"] * 2048 // (low * p["CONTROL_HZ"])
+                + 4 * sum(p[name] for name in ("STEP_HIGH_CYCLES", "STEP_LOW_CYCLES",
+                                               "DIR_SETUP_CYCLES", "ENABLE_SETUP_CYCLES")) + 1000)
     window = None
     counts = {}
     for velocity, label in ((low, "low"), (maximum, "high")):
@@ -271,8 +273,8 @@ async def nco_old_algorithm_equivalence(dut):
     p = json.loads(os.environ["STEP_TEST_PARAMS"])
     model = UnreducedNCO(p)
     rng = random.Random(0x180DD5)
-    factor = math.gcd(65536 * p["CLOCK_HZ"], p["CONTROL_HZ"])
-    threshold = 65536 * p["CLOCK_HZ"] // factor
+    factor = math.gcd(2048 * p["CLOCK_HZ"], p["CONTROL_HZ"])
+    threshold = 2048 * p["CLOCK_HZ"] // factor
     assert len(dut.phase) == max(1, (threshold - 1).bit_length())
     dut.clk.value = 0
     dut.rst_n.value = 0
@@ -287,12 +289,12 @@ async def nco_old_algorithm_equivalence(dut):
 
     vectors = [(0, 0, 0, 0, 2)]
     # Stable fractional phases, in-flight rate changes, reversal and zero.
-    for velocity in (98305, 700001, 1, 655359, 0, -98305, -(1 << 20), 0):
+    for velocity in (3073, 7001, 1, 8190, 0, -3073, -(1 << 13), 0):
         vectors.append((velocity, 1, 1, 0, 4500))
     for _ in range(100):
-        velocity = rng.choice((0, 1, -1, 65536, -65536, 98305,
-                               -(1 << 20), (1 << 20)-1,
-                               rng.randint(-(1 << 20), (1 << 20)-1)))
+        velocity = rng.choice((0, 1, -1, 2048, -2048, 3073,
+                               -(1 << 13), (1 << 13)-1,
+                               rng.randint(-(1 << 13), (1 << 13)-1)))
         rst_n = int(rng.randrange(25) != 0)
         enable = int(rng.randrange(9) != 0)
         fault = int(rng.randrange(11) == 0)
@@ -317,12 +319,18 @@ async def nco_old_algorithm_equivalence(dut):
     # Force each asynchronous abort while STEP is actually high. This also
     # exercises reset between edges and checks the original phase on restart.
     for signal in ("enable", "fault", "rst_n"):
-        velocity, rst_n, enable, fault = 655360, 1, 1, 0
+        velocity, rst_n, enable, fault = 8191, 1, 1, 0
         command(dut, velocity)
         dut.rst_n.value = 1
         dut.enable.value = 1
         dut.fault.value = 0
-        for _ in range(10000):
+        # Q11's largest positive command is just below four steps/tick.
+        # At 40 MHz its first pulse needs more than 10000 clocks.
+        bounded = min(velocity, 2048 * p["MAX_STEP_HZ"] // p["CONTROL_HZ"])
+        abort_patience = (2 * p["CLOCK_HZ"] * 2048 // (bounded * p["CONTROL_HZ"])
+                          + sum(p[name] for name in ("ENABLE_SETUP_CYCLES", "DIR_SETUP_CYCLES",
+                                                    "STEP_HIGH_CYCLES", "STEP_LOW_CYCLES")) + 10)
+        for _ in range(abort_patience):
             model.edge(velocity, rst_n, enable, fault)
             await cycle(dut)
             assert outputs() == model.outputs(velocity, rst_n, enable, fault)
@@ -363,24 +371,24 @@ def test_step_dir_exact_nco(tmp_path, configuration):
         params.update(CLOCK_HZ=100000, STEP_HIGH_CYCLES=1, STEP_LOW_CYCLES=1,
                       DIR_SETUP_CYCLES=1, DIR_HOLD_CYCLES=1, ENABLE_SETUP_CYCLES=1)
         if configuration == "blocked":
-            params.update(STEP_HIGH_CYCLES=13, STEP_LOW_CYCLES=11)
+            params.update(CONTROL_HZ=4000, STEP_HIGH_CYCLES=13, STEP_LOW_CYCLES=11)
     elif configuration == "long_direction_setup":
         # Exercise shared timers when direction setup exceeds enable setup,
         # STEP low exceeds direction hold, and high time needs a wider word.
         params.update(CLOCK_HZ=100000, STEP_HIGH_CYCLES=17, STEP_LOW_CYCLES=9,
                       DIR_SETUP_CYCLES=12, DIR_HOLD_CYCLES=3, ENABLE_SETUP_CYCLES=4)
     elif configuration == "wide_fraction":
-        # The fused signed increment must sign-extend beyond the 21-bit input.
+        # The fused signed increment must sign-extend beyond the 14-bit input.
         params.update(CLOCK_HZ=40000000)
     elif configuration == "small_split":
         # Reduced threshold 10 = 5*2 exercises the split path with a one-bit
         # fractional word, maximum increment equal to its modulus, and an
         # upper modulus different from production's 625.
-        params.update(CLOCK_HZ=10, CONTROL_HZ=65536, MAX_STEP_HZ=2,
+        params.update(CLOCK_HZ=10, CONTROL_HZ=2048, MAX_STEP_HZ=2,
                       STEP_HIGH_CYCLES=1, STEP_LOW_CYCLES=1,
                       DIR_SETUP_CYCLES=1, DIR_HOLD_CYCLES=1, ENABLE_SETUP_CYCLES=1)
     elif configuration == "unit_threshold":
-        params.update(CLOCK_HZ=1, CONTROL_HZ=65536, MAX_STEP_HZ=1,
+        params.update(CLOCK_HZ=1, CONTROL_HZ=2048, MAX_STEP_HZ=1,
                       STEP_HIGH_CYCLES=1, STEP_LOW_CYCLES=1,
                       DIR_SETUP_CYCLES=1, DIR_HOLD_CYCLES=1, ENABLE_SETUP_CYCLES=1)
     runner = get_runner("icarus")

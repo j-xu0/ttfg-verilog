@@ -50,3 +50,16 @@ accumulator 25, sampled measured/P command 14. Feedback is **P-only**: error is
 `(reference[23:11] - measured) << 11`, the Kp code selects 1/8…1, and the
 command `feedforward + Kp*error` is clamped to the profile velocity limit.
 There is no integrator, no Ki register, and no anti-windup path.
+
+## Standalone reference blocks
+
+The active top level uses `motion_engine` and `pi_p_controller`, connected to
+`step_dir_generator` with signed Q11 velocity commands. Velocity limits come
+from the selected profile in `plan_lut.vh`; the temporary fixed-8191 area
+experiment is reverted.
+
+The standalone `pi_controller` retains its Q16 contract, and `motion_planner`
+retains its parameterized standalone interface. Neither is instantiated by the
+active top level. The superseded compact planner, its test suite, and its
+private Q16 LUT/generator have been removed. The active Q11 LUT reproducibility
+check lives in `test/test_shared_controller.py`.

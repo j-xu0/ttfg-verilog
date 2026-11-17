@@ -10,7 +10,7 @@
 // Commands latch signed integer 13-bit positions and unsigned fixed-point
 // limits with FRACTION_BITS fractional bits. Position width is 13+FRACTION_BITS;
 // velocity has LIMIT_WIDTH magnitude bits plus sign. Default parameters retain
-// the original Q8 interface; the integrated controller uses Q16 / 20-bit limits.
+// the original Q8 interface; the integrated controller uses a separate Q11 engine.
 // Disable aborts immediately, holds position, clears busy/velocity, no done.
 // Zero limits reject a command by pulsing done without moving from start_position.
 // Zero distance completes on acceptance. done is one clk pulse, including when
