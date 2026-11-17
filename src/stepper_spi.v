@@ -51,6 +51,20 @@ module stepper_spi (
     reg [4:0] bit_count;
     reg [15:0] rx_shift;
 
+    // Capture deselection even when the low interval falls between clocks, so a
+    // frame cannot outlive a deselect that happened between two edges. Release
+    // only after the selection synchronizer has settled.
+    wire selection_reset_n = rst_n && selected;
+    always @(posedge clk or negedge selection_reset_n) begin
+        if (!selection_reset_n) begin
+            selected_meta <= 1'b0;
+            selected_sync <= 1'b0;
+        end else begin
+            selected_meta <= 1'b1;
+            selected_sync <= selected_meta;
+        end
+    end
+
     wire event_now = fault_event || motion_event;
     // The snapshot is four bits, not a 16-bit shift image: the transmitted bit
     // is selected by frame position instead, which replaces the whole transmit
@@ -86,8 +100,6 @@ module stepper_spi (
             cs_last <= 1'b1;
             mosi_meta <= 1'b0;
             mosi_sync <= 1'b0;
-            selected_meta <= 1'b0;
-            selected_sync <= 1'b0;
             input_valid <= 2'b00;
             cs_armed <= 1'b0;
             active <= 1'b0;
@@ -119,8 +131,6 @@ module stepper_spi (
             cs_last <= cs_sync;
             mosi_meta <= mosi;
             mosi_sync <= mosi_meta;
-            selected_meta <= selected;
-            selected_sync <= selected_meta;
             write_pulse <= 1'b0;
             target_write_pulse <= 1'b0;
             fault_clear_pulse <= 1'b0;
@@ -134,7 +144,7 @@ module stepper_spi (
             // Align selection with sampled CS. Raw deselection aborts on
             // the next clock, even while CS completion is in flight, so a
             // frame the host never finished cannot acknowledge a fault.
-            if (!selected || !selected_sync) begin
+            if (!selected_sync) begin
                 active <= 1'b0;
             end else if (cs_armed && cs_last && !cs_sync) begin
                 active <= 1'b1;

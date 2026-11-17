@@ -214,6 +214,16 @@ async def spi_contract(dut):
     await finish(dut)
     assert registers(dut) == (7, 0)
 
+    # A brief loss between rising clocks still invalidates a selected frame.
+    await begin(dut)
+    await bits(dut, 0x8009)
+    await cycles(dut)
+    dut.selected.value = 0
+    await Timer(2, unit="ns")
+    dut.selected.value = 1
+    await finish(dut)
+    assert registers(dut) == (7, 0)
+
     # Selection can drop after the final bit but before CS completion.
     await begin(dut)
     await bits(dut, 0x8009)
