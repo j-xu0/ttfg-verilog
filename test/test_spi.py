@@ -13,6 +13,7 @@ async def cycles(dut, count=1):
 
 
 async def reset(dut):
+    dut.selected.value = 1
     dut.cs_n.value = 1
     dut.sclk.value = 0
     dut.mosi.value = 0
@@ -202,6 +203,28 @@ async def spi_contract(dut):
     assert int(dut.int_pending.value) == 0
     await frame(dut, 0x8007, writes=1)
     assert registers(dut) == (7, 0)
+
+    # Reselect before the synchronized falling edge is processed.
+    dut.selected.value = 0
+    dut.cs_n.value = 0
+    await cycles(dut)
+    dut.selected.value = 1
+    await cycles(dut, 4)
+    await bits(dut, 0x8009)
+    await finish(dut)
+    assert registers(dut) == (7, 0)
+
+    # Selection can drop after the final bit but before CS completion.
+    await begin(dut)
+    await bits(dut, 0x8009)
+    dut.cs_n.value = 1
+    dut.selected.value = 0
+    await cycles(dut)
+    dut.selected.value = 1
+    await finish(dut)
+    assert registers(dut) == (7, 0)
+    await frame(dut, 0x8009, writes=1)
+    assert registers(dut) == (9, 0)
 
 
 @cocotb.test()

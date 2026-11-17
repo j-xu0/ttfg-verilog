@@ -141,6 +141,10 @@ async def rtl_register_and_encoder_integration(dut):
         set_input(dut, 4, phase & 1)
         await Timer(1000, unit="ns")
     assert int(dut.user_project.encoder.position.value) == 4
+    await spi_frame(dut, 0xE000)
+    assert int(dut.user_project.encoder.position.value) == 0
+    assert int(spi.target.value) == 0
+    assert int(spi.plan.value) == 5
 
 
 class MotorModel:
@@ -368,13 +372,24 @@ async def absolute_encoder_range_fault(dut):
     await initialize(dut)
     # Deliberately cross +4095 -> -4096 using legal transitions while disabled.
     # Port-level test also runs against a flattened gate-level netlist.
-    for index in range(4096):
+    for index in range(4095):
         phase = (1, 3, 2, 0)[index % 4]
         set_input(dut, 3, phase >> 1)
         set_input(dut, 4, phase & 1)
         await Timer(1, unit="us")
+    set_input(dut, 1, 0)
+    await Timer(1, unit="us")
+    first = await spi_bits(dut, 0, count=8)
+    set_input(dut, 3, 0)  # 10 -> 00 wraps during the read
+    last = await spi_bits(dut, 0, count=8)
+    set_input(dut, 1, 1)
+    await Timer(1, unit="us")
+    # The wrap is an event inside the read, so that frame acknowledges nothing.
+    assert (first, last) == (0, 0)
     assert int(dut.uo_out.value) & INT_PIN
     assert await spi_frame(dut, 0) == STATUS_RANGE_FAULT
+    assert not int(dut.uo_out.value) & INT_PIN
+    assert await spi_frame(dut, 0) == 0
 
     # Negative endpoint itself is valid; one further decrement must fault.
     dut.rst_n.value = 0
@@ -633,3 +648,73 @@ async def zero_position_requires_synchronized_disable(dut):
     assert int(top.position.value) == 0
     assert int(top.target.value) == 0
     assert not int(top.command_pending.value)
+
+
+@cocotb.test()
+async def deselected_spi_cannot_acknowledge_fault(dut):
+    await initialize(dut)
+    set_input(dut, 3, 1)
+    set_input(dut, 4, 1)
+    await Timer(1, unit="us")
+    assert int(dut.uo_out.value) & INT_PIN
+
+    # A frame started while deselected drives no MISO and acknowledges nothing.
+    dut.ena.value = 0
+    await Timer(1, unit="us")
+    assert await spi_frame(dut, 0) == 0
+    dut.ena.value = 1
+    await Timer(1, unit="us")
+    assert int(dut.uo_out.value) & INT_PIN
+
+    # Deselecting mid-read and reselecting before CS rises cannot turn the
+    # hidden rest of the frame into an acknowledgement, whether it drops
+    # before the first bit or part way through.
+    for drop_after in (0, 8):
+        set_input(dut, 1, 0)
+        await Timer(1, unit="us")
+        await spi_bits(dut, 0, count=drop_after)
+        dut.ena.value = 0
+        await Timer(1, unit="us")
+        dut.ena.value = 1
+        await Timer(1, unit="us")
+        assert await spi_bits(dut, 0, count=16 - drop_after) == 0
+        set_input(dut, 1, 1)
+        await Timer(1, unit="us")
+        assert int(dut.uo_out.value) & INT_PIN, f"acked after a deselect at bit {drop_after}"
+
+    assert await spi_frame(dut, 0) == STATUS_ENC_FAULT
+    assert not int(dut.uo_out.value) & INT_PIN
+
+
+@cocotb.test()
+async def encoder_event_during_read_preserves_fault(dut):
+    await initialize(dut)
+    set_input(dut, 3, 1)
+    set_input(dut, 4, 1)
+    await Timer(1, unit="us")
+
+    set_input(dut, 1, 0)
+    await Timer(1, unit="us")
+    # Idle status: no BUSY, no AT_TARGET, no fault bits in the high byte.
+    assert await spi_bits(dut, 0, count=8) == 0
+    # Another illegal transition while the original fault is still latched.
+    set_input(dut, 3, 0)
+    set_input(dut, 4, 0)
+    assert await spi_bits(dut, 0, count=8) == STATUS_ENC_FAULT
+    set_input(dut, 1, 1)
+    await Timer(1, unit="us")
+    # The event made the read stale, so the fault and interrupt survive it.
+    assert int(dut.uo_out.value) & INT_PIN
+    assert await spi_frame(dut, 0) == STATUS_ENC_FAULT
+    assert not int(dut.uo_out.value) & INT_PIN
+
+
+@cocotb.test()
+async def zero_cancels_disabled_target(dut):
+    await initialize(dut)
+    await spi_frame(dut, 0x8004)
+    await spi_frame(dut, 0xE000)
+    set_input(dut, 5, 1)
+    await Timer(1, unit="us")
+    assert int(dut.uo_out.value) == 0
+    assert await spi_frame(dut, 0) == 0

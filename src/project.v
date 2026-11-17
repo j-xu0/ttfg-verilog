@@ -141,7 +141,7 @@ module tt_um_j_xu0_stepper (
   end
 
   stepper_spi spi (
-      .clk(clk), .rst_n(rst_n),
+      .clk(clk), .rst_n(rst_n), .selected(ena),
       .sclk(ui_in[0]), .cs_n(ui_in[1]), .mosi(ui_in[2]),
       .busy(busy), .at_target(at_target),
       .fault_code({range_fault, encoder_fault}),
@@ -186,7 +186,9 @@ module tt_um_j_xu0_stepper (
   // The interrupt is a level held until a status read acknowledges it, so a
   // slow or late MCU cannot miss an event. Status is read over SPI only.
   assign motion_event = busy_last && !busy_core;
-  assign uo_out = {1'b0, (ena && rst_n && miso), 1'b0, 1'b0,
+  // Deselected frames cannot drive MISO or acknowledge a fault, so the SPI
+  // receiver gates MISO itself and the project-select term is not repeated.
+  assign uo_out = {1'b0, (rst_n && miso), 1'b0, 1'b0,
       (ena && rst_n && int_pending), driver_enable,
       (run_allowed && dir), step};
   assign uio_out = 8'h00;

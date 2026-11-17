@@ -13,11 +13,12 @@ read collapse into one assertion.
 Any complete 16-bit read (MOSI bit 15 = 0, other bits ignored) returns status
 then acknowledges the faults and the interrupt when CS rises. Reads are allowed
 while busy. A read is destructive for all latched state, so inspect the whole
-word rather than only the bit that caused the poll. Writes, partial/overlong
-frames, and reset-aborted frames never acknowledge. If any new event (fault
-latch or move completion) occurs during the read, nothing is acknowledged, the
-interrupt stays high, and the host must read again. New events take priority
-over acknowledgement.
+word rather than only the bit that caused the poll. Reads require the project to
+stay selected through frame completion; writes, partial/overlong frames, and
+frames aborted by reset or deselection never acknowledge. If any new event
+(fault latch or move completion) occurs during the read, nothing is
+acknowledged, the interrupt stays high, and the host must read again. New events
+take priority over acknowledgement.
 
 Faults immediately inhibit motor outputs and abort the old target. Acknowledging
 preserves the encoder count and does not resume that target. A fresh TARGET is
