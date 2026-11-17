@@ -62,7 +62,7 @@ atomically after synchronized CS deassertion, never during a partial transfer.
 | 0 | TARGET | 13 | 0 | Signed two's-complement position, -4096 to 4095 |
 | 1 | Reserved | - | - | Silently ignored (was CONTROL: fixed-Kp/Ki, removed for 1x1) |
 | 2 | PLAN | 3 | 0 | Acceleration code 0-7 only; velocity fixed at 8191 |
-| 3 | ZERO_POSITION | - | - | Payload must be zero; motion enable must be low; zeros position and TARGET |
+| 3 | ZERO_POSITION | - | - | Payload must be zero. Zeros position and TARGET with motion disabled per [host timing](fault-recovery.md). |
 
 CONTROL was removed: addr 1 is reserved and silently ignored. Kp was fixed at the former code 1,
 i.e. 0.25 steps/tick per encoder count (250 steps/s at 1 kHz). The PLAN velocity field was removed

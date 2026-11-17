@@ -25,15 +25,20 @@ required. The count may be inaccurate after an invalid transition or wrapped
 after a range fault: acknowledgement is permission for host-directed recovery,
 not evidence that coordinates are correct. Further faults still stop motion.
 
-Write **0xE000** to establish position zero. This command is accepted only with
-motion-enable input ui_in[5] low and a status word that does not report BUSY.
-Nonzero payloads are ignored. Keep the shaft stationary through this command. It
-zeros the encoder and TARGET, cancels pending/armed/settled motion state, and
-disables controller work. It does not acknowledge faults or change PLAN. A fresh
-TARGET is required after zeroing; asserting enable alone cannot start movement.
-Because position itself is not readable over SPI, the only confirmation that
-zeroing took effect is that the command was accepted and subsequent at-target
-reads agree with the host's own bookkeeping.
+Write **0xE000** to establish position zero. Drive motion enable (`ui_in[5]`)
+low at least four system-clock periods (400 ns at 10 MHz) before asserting CS.
+Hold it low throughout the frame and for at least four system-clock periods
+after deasserting CS so the command can commit and the encoder can consume it.
+The SPI receiver requires synchronized disable from frame start through commit,
+and a status word that does not report BUSY. Nonzero payloads are ignored.
+
+Keep the shaft stationary through this command. It zeros the encoder and TARGET,
+cancels pending/armed/settled motion state, and disables controller work. It does
+not acknowledge faults or change PLAN. A fresh TARGET is required after zeroing;
+asserting enable alone cannot start movement. Because position itself is not
+readable over SPI, the only confirmation that zeroing took effect is that the
+command was accepted and subsequent at-target reads agree with the host's own
+bookkeeping.
 
 The MCU can acknowledge a fault, perform homing using its own independent
 reference, disable motion, zero position, then issue a fresh target. It must

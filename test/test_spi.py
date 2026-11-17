@@ -254,6 +254,39 @@ async def recovery_commands(dut):
     assert await transaction(0xE000) == (0x0003, 0, 1)
     assert int(dut.target.value) == 0
 
+    # Disable must be held from the sampled CS assertion through commit, not
+    # just present at commit time: asserting it mid-frame is too late, and
+    # releasing it mid-frame is not undone by re-asserting before CS rises.
+    async def finish_zeroing():
+        dut.cs_n.value = 1
+        clears = zeros = 0
+        for _ in range(8):
+            await cycles(dut)
+            clears += int(dut.fault_clear_pulse.value)
+            zeros += int(dut.zero_position_pulse.value)
+        return clears, zeros
+
+    # A nonzero TARGET makes a spurious zero visible.
+    assert await transaction(0x8000 | 17) == (0x0003, 0, 0)
+    assert int(dut.target.value) == 17
+
+    dut.motion_disabled.value = 0
+    await begin(dut)
+    await bits(dut, 0xE0, count=8)
+    dut.motion_disabled.value = 1
+    await cycles(dut)
+    await bits(dut, 0x00, count=8)
+    assert await finish_zeroing() == (0, 0)
+
+    await begin(dut)
+    await bits(dut, 0xE0, count=8)
+    dut.motion_disabled.value = 0
+    await cycles(dut)
+    dut.motion_disabled.value = 1
+    await bits(dut, 0x00, count=8)
+    assert await finish_zeroing() == (0, 0)
+    assert registers(dut) == (17, 2)
+
 
 def test_spi(tmp_path):
     from cocotb_tools.runner import get_runner

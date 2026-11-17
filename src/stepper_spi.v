@@ -9,7 +9,8 @@
 // Transactions are exactly 16 bits: {write, address[1:0], payload[12:0]}.
 // Address 0 = signed target, 1 = reserved, 2 = plan[2:0] (acceleration
 // code only; velocity is fixed). Address 1 is reserved.
-// Write 0xE000 zeros position/target only while motion is disabled.
+// Write 0xE000 zeros position/target only while motion_disabled stays high
+// from the sampled CS assertion through commit. The input is synchronous.
 // Writes commit only after CS rises. No partial frame can write.
 // Every frame returns a status snapshot captured when synchronized CS falls:
 // {1'b0, busy, at_target, 11'b0, range_fault, encoder_fault}. The snapshot
@@ -42,7 +43,7 @@ module stepper_spi (
     reg active, frame_busy, frame_write;
     reg frame_at_target;
     reg [1:0] frame_fault;
-    reg event_during_frame;
+    reg event_during_frame, disabled_through_frame;
     reg [4:0] bit_count;
     reg [15:0] rx_shift;
 
@@ -89,6 +90,7 @@ module stepper_spi (
             frame_fault <= 2'b00;
             frame_write <= 1'b1;
             event_during_frame <= 1'b0;
+            disabled_through_frame <= 1'b0;
             int_pending <= 1'b0;
             bit_count <= 5'd0;
             target <= 13'sd0;
@@ -127,6 +129,7 @@ module stepper_spi (
                 frame_at_target <= at_target;
                 frame_fault <= fault_code;
                 frame_write <= 1'b1;
+                disabled_through_frame <= motion_disabled;
                 bit_count <= 5'd0;
                 event_during_frame <= event_now;
             end else if (!cs_last && cs_sync) begin
@@ -151,7 +154,8 @@ module stepper_spi (
                                 write_pulse <= 1'b1;
                             end
                             2'd3: begin
-                                if (rx_shift[12:0] == 0 && motion_disabled) begin
+                                if (rx_shift[12:0] == 0 && disabled_through_frame &&
+                                    motion_disabled) begin
                                     zero_position_pulse <= 1'b1;
                                     target <= 0;
                                     write_pulse <= 1'b1;
@@ -164,6 +168,7 @@ module stepper_spi (
                     // The host already has that same BUSY bit and must retry.
                 end
             end else if (active && !cs_sync) begin
+                disabled_through_frame <= disabled_through_frame && motion_disabled;
                 if (!sclk_last && sclk_sync) begin
                     // First sampled bit is the write/read flag for the gate.
                     if (bit_count == 5'd0)

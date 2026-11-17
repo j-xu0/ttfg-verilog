@@ -30,18 +30,19 @@ Each suite contains many directed cases:
   all invalid two-bit transitions, sticky fault, counting after fault, signed
   wrap in both directions, and reset recovery.
 
-The Makefile compiles `tt_um_j_xu0_stepper` through `tb.v` and runs ten integration
+The Makefile compiles `tt_um_j_xu0_stepper` through `tb.v` and runs integration
 tests at 10 MHz clk / 500 kHz SPI: pins/status/reset, RTL wiring, short moves with
 a lost step and shaft disturbance, abort/fault recovery, both absolute signed
 boundaries, and a long move reaching the 4 kHz pulse ceiling followed by the
-lowest PLAN codes. The seventh test checks RTL serial-reference sampling before
-workspace reuse; the eighth checks raw disable/reset during both shared-engine
-phases and prevents restart. The ninth is the directed waveform scenario: three
-SPI setup writes while disabled, then a 64-step accel/decel-only move with no
-cruise, ending in an at-target status read. The tenth checks fault acknowledgment
-and zeroing the position. Shared module tests sweep transient feedback cancellations and compare against independent trajectory and fixed-Kp P
-models. Motor-model tests use external pins with one legal encoder
-transition per STEP edge. They verify digital feedback
+lowest PLAN codes. Tests also check RTL serial-reference sampling before
+workspace reuse and disable/reset during both shared-engine phases. The directed
+waveform scenario starts with three SPI setup writes while disabled, then runs a
+64-step accel/decel-only move with no cruise and ends with an at-target status
+read. Shared module tests sweep transient feedback cancellations and compare
+against independent trajectory and fixed-Kp P models. Directed regressions cover
+a 20 ns disable during a high STEP between clock edges and enable transitions
+around ZERO_POSITION frames. Motor-model tests use external pins with one legal
+encoder transition per STEP edge. They verify digital feedback
 behavior, not a real motor's mechanics or tuning. Results are `test/results.xml`
 and `test/tb.fst`. Planner reset must span a rising clock edge.
 
@@ -53,7 +54,8 @@ flow. Place its powered netlist at `test/gate_level_netlist.v` and point
 make -C test -B GATES=yes
 ```
 
-The hierarchy-dependent wiring, serial-sampling and phase-abort tests are skipped with `GATES=yes`;
+The hierarchy-dependent wiring, serial-sampling, phase-abort and ZERO_POSITION
+qualification tests are skipped with `GATES=yes`;
 all external pin tests still run. The retained GF180 GDS workflow separately
 handles netlist and PDK setup in GitHub Actions. No gate-level or physical result
 is implied by the local RTL tests.

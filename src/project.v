@@ -21,6 +21,8 @@ module tt_um_j_xu0_stepper (
   wire miso, encoder_fault, write_pulse, target_write_pulse;
   wire int_pending, frame_holds_motion, motion_event;
   (* async_reg = "true" *) reg enable_meta, enable_sync;
+  (* async_reg = "true" *) reg pin_enable_meta, pin_enable_sync;
+  wire enable_reset_n = rst_n && ui_in[5];
   reg previous_sign, busy_last;
   reg range_fault;
   wire fault_clear_pulse, zero_position_pulse, encoder_event;
@@ -30,8 +32,9 @@ module tt_um_j_xu0_stepper (
   reg command_pending, active, armed, settled;
   reg [1:0] settle_count;
   wire fault = encoder_fault || range_fault;
-  // Raw low immediately inhibits pins; assertion still passes the synchronizer.
-  wire run_allowed = rst_n && ena && ui_in[5] && enable_sync && !fault && !zero_position_pulse;
+  // Raw low inhibits the pins through the enable synchronizer's asynchronous
+  // reset, so the inhibit does not wait for a clock edge.
+  wire run_allowed = rst_n && ena && enable_sync && !fault && !zero_position_pulse;
   // A frame in flight freezes the launch instant so the BUSY bit returned by
   // that same frame is the exact write verdict. busy_core stays ungated for
   // edge detection, otherwise gating a queued command would look like a
@@ -50,10 +53,32 @@ module tt_um_j_xu0_stepper (
   wire target_reached = active && !planner_busy && !planner_calculating
       && position == target;
 
-  always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
+  // A falling enable immediately inhibits pins and holds them off through
+  // clocked cleanup, even if the entire low pulse occurs between clocks.
+  always @(posedge clk or negedge enable_reset_n) begin
+    if (!enable_reset_n) begin
       enable_meta <= 0;
       enable_sync <= 0;
+    end else begin
+      enable_meta <= 1;
+      enable_sync <= enable_meta;
+    end
+  end
+
+  // ZERO_POSITION needs a synchronized sample of the host pin in both
+  // directions. The motion inhibit above also covers re-enable latency.
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      pin_enable_meta <= 1;
+      pin_enable_sync <= 1;
+    end else begin
+      pin_enable_meta <= ui_in[5];
+      pin_enable_sync <= pin_enable_meta;
+    end
+  end
+
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
       previous_sign <= 0;
       busy_last <= 0;
       range_fault <= 0;
@@ -63,8 +88,6 @@ module tt_um_j_xu0_stepper (
       settled <= 0;
       settle_count <= 0;
     end else begin
-      enable_meta <= ui_in[5];
-      enable_sync <= enable_meta;
       previous_sign <= position[12];
       busy_last <= busy_core;
       // Each encoder update is at most one count, so sign plus the new
@@ -123,7 +146,7 @@ module tt_um_j_xu0_stepper (
       .busy(busy), .at_target(at_target),
       .fault_code({range_fault, encoder_fault}),
       .fault_event(encoder_event || range_event),
-      .motion_event(motion_event), .motion_disabled(!ui_in[5]),
+      .motion_event(motion_event), .motion_disabled(!pin_enable_sync),
       .fault_clear_pulse(fault_clear_pulse), .zero_position_pulse(zero_position_pulse),
       .miso(miso), .frame_holds_motion(frame_holds_motion),
       .int_pending(int_pending), .target(target), .plan(plan),
