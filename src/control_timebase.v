@@ -19,6 +19,13 @@ module control_timebase #(
     input wire enable,
     output reg control_ce
 );
+`ifndef SYNTHESIS
+    initial begin
+        if (CLOCK_HZ <= 0 || CONTROL_HZ <= 0 ||
+            CLOCK_HZ % CONTROL_HZ != 0)
+            $fatal(1, "TIMEBASE requires positive CLOCK_HZ exact multiple of CONTROL_HZ");
+    end
+`endif
     localparam integer DIVISOR = CLOCK_HZ / CONTROL_HZ;
     localparam integer COUNT_WIDTH = (DIVISOR > 1) ? $clog2(DIVISOR) : 1;
     localparam [COUNT_WIDTH-1:0] LAST_COUNT = DIVISOR - 1;
