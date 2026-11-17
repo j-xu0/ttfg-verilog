@@ -1,4 +1,8 @@
-# Follow-up area audit
+# Follow-up area audit (before the shared engine)
+
+This records the independent-engine milestone at `4539f9d`. The subsequent
+[shared-engine implementation](shared-controller.md) reduces area further to
+58,174.9952 um²; the historical comparisons below retain their original values.
 
 The complete controller still does **not** fit the mandatory 1x1 tile. This audit
 reduces controlled GF180 mapped area from **71,420.8320 to 61,318.5216 um²**

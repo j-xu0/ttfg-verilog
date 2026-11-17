@@ -13,13 +13,13 @@ strategy, so compare its baseline and optimized result with each other.
 
 | Metric | Baseline | Optimized |
 | --- | ---: | ---: |
-| Mapped cell area (um²) | 140,824.2752 | 61,318.5216 |
-| Sequential cell area (um²) | 39,823.1232 | 27,005.3504 |
-| Mapped cells | 6,288 | 2,480 |
-| Flip-flops | 586 | 392 |
+| Mapped cell area (um²) | 140,824.2752 | 58,174.9952 |
+| Sequential cell area (um²) | 39,823.1232 | 24,017.6832 |
+| Mapped cells | 6,288 | 2,372 |
+| Flip-flops | 586 | 353 |
 
-Cell area falls **56.5%**. The failed 1x1 run's core area was 51,966.970 um²;
-optimized cells alone still occupy 118.0% of that, without fixed-cell, pin-density,
+Cell area falls **58.7%**. The failed 1x1 run's core area was 51,966.970 um²;
+optimized cells alone still occupy 111.9% of that, without fixed-cell, pin-density,
 routing or clock-tree headroom. Raising placement density cannot resolve this
 capacity mismatch. The earlier passing 3x2 result does not satisfy the requirement.
 
@@ -28,8 +28,9 @@ hashes. `scripts/measure_gf180_area.py` reproduces the synthesis procedure and
 writes detailed logs/netlists outside the source checkout. It accepts `--top`
 and `--parameter NAME=value` for module comparisons.
 
-The follow-up audit reduces the previous 71,420.8320 um² result by a further
-**14.1%**, preserving the same behavior and Q16 arithmetic. See the
+The follow-up audit reduced 71,420.8320 to 61,318.5216 um² (**14.1%**).
+The new shared engine reduces that by another **5.1%**, preserving features and
+Q16 arithmetic. See the [shared-controller design](shared-controller.md) and the
 [module audit and tradeoffs](area-audit.md) for the measured changes and rejected
 experiments. CI on the previous `b6c5a90` source confirmed 165.870% placement
 utilization (`GPL-0301`); these new local measurements are not a physical fit.
@@ -59,12 +60,17 @@ utilization (`GPL-0301`); these new local measurements are not a physical fit.
    the new endpoint because encoder updates are at most one count. Configuration
    lookup definitions are shared with the generated planner constants.
 
-Planner work completes within 700 system clocks and PI work within 450 clocks;
-the control period is 10,000 clocks at the unchanged 10 MHz target. Intermediate
-planner outputs are invalid while calculating. PI samples the prior completed
-reference on the same edge the next planner calculation starts, preserving the
-original per-sample calculation order. PI publishes its new command later in the
-period, so the entire controller is not claimed cycle-identical to the old RTL.
+6. **Shared PI/planner engine.** A single FSM, 30-bit accumulator/error ring,
+   counter, carry and adder execute both calculations. PI error is calculated
+   serially; its work register first captures feedback and later holds the next
+   command. Persistent rings restore before a cancelled PI yields to planning.
+
+The combined calculation completes within 2,000 clocks; the control period is
+10,000 clocks at the unchanged 10 MHz target. Reference outputs are invalid while
+calculating, including serial error subtraction. PI samples the prior completed
+reference, publishes its command atomically, then the planner advances. Numeric
+sample ordering is preserved; sub-period timing changes mean the full controller
+is not claimed cycle-identical to the independent engines.
 
 ## Verification and remaining work
 
@@ -77,9 +83,9 @@ split-phase and boundary configurations. External motor-model tests retain
 missed-step correction, reverse commands, shaft disturbances, fault/disable/reset,
 range faults, settling, the 10 kHz ceiling and lowest motion settings.
 
-A substantially smaller shared planner/PI storage and arithmetic architecture is
-still required for 1x1; these separate serial engines retain too much register and
-routing/multiplexer logic. A diagnostic one-constant replacement for the stopping
+Shared storage/arithmetic is now implemented, but it does not close the 1x1 gap.
+The remaining persistent registers have overlapping lifetimes, limiting further
+direct sharing. A diagnostic one-constant replacement for the stopping
 ROM saved only about 2,737 um² in the earlier planner, so removing this table alone
 cannot close the gap. No larger tile, disabled check, reduced clock or feature
 removal is used to make this milestone appear to fit. Full 1x1 hardening must

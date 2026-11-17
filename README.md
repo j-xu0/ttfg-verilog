@@ -24,7 +24,7 @@ repository's existing `ttgf26a` workflow. The system clock target is **10 MHz**;
 `info.yaml` and the 100 ns constraint in `src/config.json` agree.
 
 **The mandatory allocation is 1x1.** The area-optimized controller still exceeds
-that budget: controlled GF180 synthesis measures 61,319 um² versus the original
+that budget: controlled GF180 synthesis measures 58,175 um² versus the original
 140,824 um². It is development RTL until a 1x1 hardening run succeeds. See
 [the optimization results](docs/area-optimization.md) and
 [the hardening history](docs/hardening.md).
@@ -35,7 +35,7 @@ With Python, Icarus Verilog, and make installed, run from the repository root:
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r test/requirements.txt
-python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py test/test_compact_planner.py test/test_pi.py test/test_step_dir.py -q
+python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py test/test_pi.py test/test_step_dir.py -q
 make -C test -B
 ```
 
