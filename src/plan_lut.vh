@@ -26,7 +26,7 @@ function [10:0] profile_acceleration;
     endcase end
 endfunction
 // Kept for the standalone reference planners (motion_planner.v,
-// compact_motion_planner.v). The integrated shared engine tracks the
+// shared engine). The integrated shared engine tracks the
 // exact Q11 brake sum incrementally and does not use this table.
 // Stop sums above every legal move are rejected with a 14-bit sentinel.
 function [13:0] profile_stopping;

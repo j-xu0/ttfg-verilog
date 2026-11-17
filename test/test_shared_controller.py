@@ -330,3 +330,10 @@ def test_shared_controller(tmp_path, stable_config):
     runner.test(hdl_toplevel="shared_motion_controller", test_module="test_shared_controller",
                 test_dir=Path(__file__).parent, results_xml=str(tmp_path / "results.xml"),
                 extra_env={"SHARED_STABLE": str(stable_config)})
+
+
+def test_generated_plan_rom():
+    import runpy
+    root = Path(__file__).resolve().parents[1]
+    script = runpy.run_path(str(root / 'scripts' / 'generate_plan_lut.py'))
+    assert (root / 'src' / 'plan_lut.vh').read_text() == script['render']()

@@ -103,9 +103,11 @@ Planner inputs remain stable while busy because SPI rejects writes. This permits
 `STABLE_CONFIG=1` to omit redundant target/profile registers. Disable/reset
 cancels an unfinished calculation; the next command starts from measured position.
 
-The old `motion_planner.v` (now a mirror-rule reference with no stopping-distance
-arithmetic), `compact_motion_planner.v` and `pi_controller.v` remain
-as independently tested references, excluded from the physical source list.
+The original `motion_planner.v` (a mirror-rule reference with no stopping-distance
+arithmetic) and `pi_controller.v` remain as independently tested references,
+excluded from the physical source list. The superseded standalone compact planner
+and its duplicate suite have been removed; shared-controller tests cover the
+active serial planner.
 No speed, acceleration,
 gain, position-range, or Q16 fractional-resolution setting is removed.
 

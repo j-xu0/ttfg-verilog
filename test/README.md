@@ -6,7 +6,7 @@ Install Icarus Verilog and make, then run from the repository root:
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r test/requirements.txt
-python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py test/test_compact_planner.py test/test_pi.py test/test_step_dir.py test/test_shared_controller.py -q
+python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py test/test_pi.py test/test_step_dir.py test/test_shared_controller.py -q
 make -C test -B
 ```
 
@@ -15,9 +15,8 @@ Each suite contains many directed cases:
 
 - Timebase and planner: standalone motion-building-block tests described in
   [the motion-planning contract](../docs/motion-planning.md), including Q8/Q16
-  equivalence and mirror-rule trapezoid/triangle coverage. The standalone compact planner
-  separately checks all 64 profiles, sentinel bounds, stable-config mode, transient
-  workspace sampling, mid-calculation aborts, and generated ROM reproducibility.
+  equivalence and mirror-rule trapezoid/triangle coverage. Generated ROM
+  reproducibility is checked alongside the shared controller tests.
 - Shared controller: both captured/stable configurations, all profiles and gain
   pairs, sampled input isolation, PI-only correction, cancellation, shared-ring
   restoration and completion within 2,000 clocks.

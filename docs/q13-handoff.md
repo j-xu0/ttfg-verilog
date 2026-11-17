@@ -157,7 +157,7 @@ sits on top of it. The last spec-preserving RTL commit is `d1acbd8`.
   `full_speed_and_default_limits` was updated from the retired 10 kHz
   assumption to the current 4 kHz / Q11 ceiling. `serial_reference_sampling`
   checks the P publication edge; `shared_engine_abort_phases` passes.
-* `test_planner`, `test_compact_planner`, `test_pi`, `test_step_dir` remain
+* `test_planner`, `test_pi`, `test_step_dir` remain
   Q16-era reference tests for modules outside `PROJECT_SOURCES`; the CI module
   test job still fails on them. They are unrelated to the current P-only engine.
 
