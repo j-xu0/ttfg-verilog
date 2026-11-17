@@ -36,7 +36,6 @@ SUITES = {
     "encoder": ["test/test_encoder.py"],
     "timebase": ["test/test_timebase.py"],
     "planner": ["test/test_planner.py"],
-    "compact_planner": ["test/test_compact_planner.py"],
     "pi": ["test/test_pi.py"],
     "step_dir": ["test/test_step_dir.py"],
     "shared_controller": ["test/test_shared_controller.py"],
@@ -68,8 +67,6 @@ def label_for(name: str, item: str) -> str:
             return "planner__q16_serial"
         if "16_20_0" in item:
             return "planner__q16_parallel"
-    if name == "compact_planner":
-        return "compact_planner__stable" if "_1_0" in item else "compact_planner__unstable"
     if name == "pi":
         if "_1_1_0" in item:
             return "pi__serial_stable"

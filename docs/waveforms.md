@@ -69,7 +69,7 @@ Q8 experiment:
 
 - changes `Q16 -> Q8` in `plan_lut.vh`, `project.v`,
   `shared_motion_controller.v`, and `step_dir_generator.v`;
-- fails its `test` workflow on planner/compact-planner and range assertions;
+- fails its `test` workflow on planner and range assertions;
 - also fails `test/test_step_dir.py` because that suite assumes Q16 units
   (`pulse_contract` command scaling, and the phase-width assertion in
   `nco_old_algorithm_equivalence`), so the STEP/DIR traces cannot be regenerated
@@ -111,8 +111,6 @@ one FST per parameter configuration.
 | `planner__q8_parallel.fst` | `motion_planner` | Q8 reference, parallel | 0.115 ms | 35 |
 | `planner__q16_parallel.fst` | `motion_planner` | Q16 reference, parallel | 0.406 ms | 35 |
 | `planner__q16_serial.fst` | `motion_planner` | Q16 reference, serial setup | 0.406 ms | 35 |
-| `compact_planner__unstable.fst` | `compact_motion_planner` | `STABLE_CONFIG=0` | 48.135 ms | 35 |
-| `compact_planner__stable.fst` | `compact_motion_planner` | `STABLE_CONFIG=1` | 48.135 ms | 35 |
 | `pi__parallel.fst` | `pi_controller` | `SERIAL=0` | 0.022 ms | 26 |
 | `pi__serial.fst` | `pi_controller` | `SERIAL=1` | 1.690 ms | 37 |
 | `pi__serial_stable.fst` | `pi_controller` | `SERIAL=1`, `STABLE_CONFIG=1` | 1.690 ms | 37 |
@@ -128,8 +126,8 @@ FST timestamps are in picoseconds; the “Sim length” values above are convert
 to milliseconds for readability. Signal counts were re-measured from the
 generated save files after the STEP/DIR pruning, not carried over.
 
-The 58 ms shared-controller traces and the 48 ms compact-planner traces are long
-because the tests sweep many cancellations/profiles. The local full-chip e2e
+The 58 ms shared-controller traces are long because the tests sweep many
+cancellations/profiles. The local full-chip e2e
 trace is long because the eight tests it contains run in one simulation. The
 directed chip trace is the short alternative: only one testcase runs, so the FST
 is 56 ms and the whole profile fits on screen.
@@ -446,29 +444,6 @@ The important behavior is that position advances per tick, speed accelerates /
 cruises / decelerates, and the mirror rule avoids the runtime divide/multiply
 engine. Use the `busy`/`done` handshake and `reference_position` as the primary
 view; the distance signals explain why a speed decision was made.
-
-### Compact planner — `compact_planner__*.fst` / `.gtkw`
-
-Top: `compact_motion_planner`. **Not instantiated by the chip top**; it is the
-compact standalone planner with the generated 64-profile LUT in `plan_lut.vh`.
-
-Variants: `unstable` (`STABLE_CONFIG=0`, latches host inputs) and `stable`
-(`STABLE_CONFIG=1`, owner must hold inputs while busy).
-
-Signals:
-
-- `start_position`, `target_position`, `plan_code`, `profile`, `goal`.
-- `reference_position`, `reference_velocity`, `busy`, `done`, `calculating`.
-- `state`, `next_state`, `bit_index`, `operand_a`, `operand`, `carry`,
-  `subtract`, `working` — serial FSM/ALU.
-- `speed`, `stopping`, `accumulator`, `vmax`, `max_stop`, `negative`,
-  `capped`, `finishing`, `source_position_sign` — planner state.
-- `write_position`, `write_speed`, `write_stopping` — publish strobes.
-
-The 48 ms length comes from sweeping all 64 profiles and both stable
-configurations. For a first look, zoom into one `start`/`tick` sequence and
-watch `state` walk through `BEGIN_DIST -> DIST -> ... -> POSITION/VELOCITY`, with
-`reference_position` updating only when calculation completes.
 
 ### PI — `pi__*.fst` / `.gtkw`
 
@@ -896,7 +871,7 @@ When the user says “I’m looking at X”:
    directed chip trace `e2e__spi_init_short_move` covers the “SPI setup + one
    tiny move” case. Still missing, in usefulness order:
    - one abort during PI and one during planner;
-   - one compact-planner profile.
+   - one shared-controller planner profile.
    The STEP/DIR trace is still two tests in one file (demo, then the equivalence
    sweep); splitting them into separate FSTs would make the demo trace ~0.9 ms
    instead of 2.1 ms.
