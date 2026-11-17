@@ -1,6 +1,6 @@
 `default_nettype none
 // Fixed-gain proportional position stage. The velocity feedforward term and
-// runtime Kp selection were removed for 1x1 area; CONTROL[3:2] is reserved.
+// runtime Kp selection were removed for 1x1 area; SPI addr 1 (ex-CONTROL) is reserved.
 // Kp is fixed at the former code 1: clamp the integer error to +/-32 so the
 // 16-bit P term cannot overflow, then scale by 2^9 (Q11). The clamp to vmax
 // keeps the published command inside the profile's velocity limit.

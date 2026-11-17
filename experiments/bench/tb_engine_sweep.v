@@ -2,7 +2,7 @@
 module tb;
   reg clk=0, rst_n=0, enable=1, control_enable=1, clear_control=0, start=0, tick=0;
   reg signed [12:0] start_position=0, target_position=0;
-  reg [5:0] plan_code=0; reg [1:0] kp=0;
+  reg [2:0] plan_code=0; reg [1:0] kp=0;
   wire signed [23:0] reference_position; wire signed [13:0] reference_velocity;
   wire busy, done, pcalc, picalc, calc; wire signed [13:0] vcmd; wire sat;
   shared_motion_controller dut(.clk(clk),.rst_n(rst_n),.enable(enable),.control_enable(control_enable),
@@ -17,7 +17,7 @@ module tb;
   initial begin
 
     if (!$value$plusargs("goal=%d", target_position)) target_position = 300;
-    if (!$value$plusargs("code=%d", plan_code)) plan_code = 63;
+    if (!$value$plusargs("code=%d", plan_code)) plan_code = 7;
     repeat(3) nege; rst_n=1; nege;
     start_position=0; start=1; nege; start=0; nege; nege;
     for (t=0; t<400; t=t+1) begin

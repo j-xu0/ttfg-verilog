@@ -17,8 +17,7 @@ module tt_um_j_xu0_stepper (
     input  wire       rst_n
 );
   wire signed [12:0] target, position;
-  wire [3:0] control;
-  wire [5:0] plan;
+  wire [2:0] plan;
   wire miso, encoder_fault, write_pulse, reject_pulse, target_write_pulse;
   (* async_reg = "true" *) reg enable_meta, enable_sync;
   reg previous_sign;
@@ -109,7 +108,7 @@ module tt_um_j_xu0_stepper (
       .clk(clk), .rst_n(rst_n),
       .sclk(ui_in[0]), .cs_n(ui_in[1]), .mosi(ui_in[2]),
       .busy(busy), .fault(fault), .at_target(at_target),
-      .miso(miso), .target(target), .control(control), .plan(plan),
+      .miso(miso), .target(target), .plan(plan),
       .write_pulse(write_pulse), .reject_pulse(reject_pulse),
       .target_write_pulse(target_write_pulse)
   );
@@ -129,7 +128,7 @@ module tt_um_j_xu0_stepper (
       .clk(clk), .rst_n(rst_n), .tick(control_ce), .enable(run_allowed),
       .control_enable(active), .clear_control(launch || target_reached),
       .start(launch), .start_position(position), .target_position(target),
-      .plan_code(plan), .kp_select(control[3:2]),
+      .plan_code(plan), .kp_select(2'b00),
       .reference_position(reference_position), .reference_velocity(reference_velocity),
       .planner_busy(planner_busy), .planner_done(planner_done),
       .planner_calculating(planner_calculating), .pi_calculating(pi_calculating),
@@ -147,7 +146,7 @@ module tt_um_j_xu0_stepper (
       (ena && rst_n && busy), driver_enable, (run_allowed && dir), step};
   assign uio_out = 8'h00;
   assign uio_oe = 8'h00;
-  wire _unused = &{ui_in[7:6], uio_in, write_pulse, reject_pulse, planner_done, control[1:0],
+  wire _unused = &{ui_in[7:6], uio_in, write_pulse, reject_pulse, planner_done,
                    pi_saturated, rate_limited, pi_calculating, engine_calculating, 1'b0};
 endmodule
 `default_nettype wire

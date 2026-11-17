@@ -11,7 +11,7 @@
 module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
     input wire clk, rst_n, enable, control_enable, clear_control, start, tick,
     input wire signed [12:0] start_position, target_position,
-    input wire [5:0] plan_code,
+    input wire [2:0] plan_code,
     input wire [1:0] kp_select,
     output wire signed [23:0] reference_position,
     output wire signed [13:0] reference_velocity,
@@ -24,7 +24,7 @@ module shared_motion_controller #(parameter integer STABLE_CONFIG=0) (
     wire engine_calculating;
     wire accept = tick && !engine_calculating && control_enable && !clear_control;
     reg pi_strobe;
-    always @(posedge clk) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) pi_strobe <= 1'b0;
         else pi_strobe <= accept;
     end

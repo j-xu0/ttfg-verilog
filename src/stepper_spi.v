@@ -7,8 +7,9 @@
 // and remain stable until falling SCLK. Hold CS high for four clocks after
 // reset before starting a frame; a frame already active at reset is ignored.
 // Transactions are exactly 16 bits: {write, address[1:0], payload[12:0]}.
-// Address 0 = signed target, 1 = control[3:0], 2 = plan[5:0]. Address 3
-// is reserved. Writes commit only after CS rises. No partial frame can write.
+// Address 0 = signed target, 1 = reserved, 2 = plan[2:0] (acceleration
+// code only; velocity is fixed). Address 1 and 3 are reserved.
+// Writes commit only after CS rises. No partial frame can write.
 // Every frame returns a status snapshot captured when synchronized CS falls:
 // {1'b0, busy, at_target, fault, 12'b0}. Read commands (write=0) ignore
 // address/payload and never modify registers. MISO is zero while idle.
@@ -18,8 +19,7 @@ module stepper_spi (
     input wire busy, fault, at_target,
     output wire miso,
     output reg signed [12:0] target,
-    output reg [3:0] control,
-    output reg [5:0] plan,
+    output reg [2:0] plan,
     output reg write_pulse, reject_pulse,
     output reg target_write_pulse
 );
@@ -60,8 +60,7 @@ module stepper_spi (
             bit_count <= 5'd0;
             tx_shift <= 16'd0;
             target <= 13'sd0;
-            control <= 4'd0;
-            plan <= 6'd0;
+            plan <= 3'd0;
             write_pulse <= 1'b0;
             target_write_pulse <= 1'b0;
             reject_pulse <= 1'b0;
@@ -100,12 +99,9 @@ module stepper_spi (
                                 write_pulse <= 1'b1;
                                 target_write_pulse <= 1'b1;
                             end
-                            2'd1: begin
-                                control <= rx_shift[3:0];
-                                write_pulse <= 1'b1;
-                            end
+                            2'd1: reject_pulse <= 1'b1;
                             2'd2: begin
-                                plan <= rx_shift[5:0];
+                                plan <= rx_shift[2:0];
                                 write_pulse <= 1'b1;
                             end
                             default: reject_pulse <= 1'b1;

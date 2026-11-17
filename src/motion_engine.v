@@ -10,7 +10,7 @@
 module motion_engine #(parameter integer STABLE_CONFIG=0) (
     input wire clk, rst_n, enable, start, tick,
     input wire signed [12:0] start_position, target_position,
-    input wire [5:0] plan_code,
+    input wire [2:0] plan_code,
     output reg signed [23:0] reference_position,
     output wire signed [13:0] reference_velocity,
     output reg planner_busy, planner_done,
@@ -31,9 +31,9 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
     reg [3:0] operand_a, operand;
     reg [1:0] carry;
     reg subtract;
-    reg [5:0] latched_profile;
+    reg [2:0] latched_profile;
     reg signed [12:0] latched_goal;
-    wire [5:0] profile = STABLE_CONFIG != 0 ? plan_code : latched_profile;
+    wire [2:0] profile = STABLE_CONFIG != 0 ? plan_code : latched_profile;
     wire signed [12:0] goal = STABLE_CONFIG != 0 ? target_position : latched_goal;
     reg negative, source_position_sign;
     reg [12:0] speed;
@@ -70,7 +70,7 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
     // EXPERIMENT: fixed maximum velocity, acceleration still plan-selected.
     wire [12:0] profile_limit = 13'd8191;
     assign vmax = profile_limit;
-    wire [10:0] accel = profile_acceleration(profile[5:3]);
+    wire [10:0] accel = profile_acceleration(profile);
     wire signed [12:0] pos_int = reference_position[23:11];
     wire signed [23:0] goal_q11 = {goal, 11'b0};
     // The full position register rotates during every position pass; DIST and
