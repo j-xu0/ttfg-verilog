@@ -60,3 +60,28 @@ needs the width changes to pay off.
 
 Local synthesis is not a fit decision. Push this branch and read the CI `gds`
 run (`GPL-0018`/`GPL-0301`, `DPL`, `DRT`) before trusting the 82.9 % number.
+
+## CI result — run 44132561693 (commit 2ed4e39)
+
+The flow hardened and routed cleanly for the first time on 1x1 (`gds` job passed
+in 5m37s, `precheck` passed):
+
+| metric | value |
+|---|---:|
+| GPL original cell area | 41,578.41 µm² |
+| GPL final placement area (+3.21 % routability inflation) | 42,913.48 µm² |
+| available free area | 50,439.11 µm² |
+| minimum feasible density | **0.8300** |
+| placement target density | 0.8505 |
+| DRT violation trajectory | 495 → 177 → 130 → 4 → 1 → 1 → **0** |
+| GDS / precheck | **pass** |
+
+For comparison, the previous fixed-`vmax` submission never finished DRT (it was
+cancelled at the 6 h job limit after plateauing around 2.6–3.0 k violations),
+and the spec-preserving P-only run was at 97.5 % utilisation with `DPL-0036`.
+
+`gl_test` still fails, but in the testbench rather than the netlist: gate-level
+`uo_out` can briefly carry X and `test/test.py` calls `int(dut.uo_out.value)`
+(`MotorModel.run`). The RTL suites pass; this is a GL harness X-handling issue.
+The separate `test` workflow is red only on the pre-existing Q16-era
+`compact_planner`/`step_dir` tests (14 passed, 12 failed).
