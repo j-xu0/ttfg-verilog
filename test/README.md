@@ -36,8 +36,7 @@ pip install -r test/requirements.txt
 python scripts/run_tests.py --jobs 4
 ```
 
-`--jobs 4` runs up to four suites concurrently. Integration, STEP/DIR, compact
-planner, and shared controller start first to overlap the longest simulations.
+`--jobs 4` runs up to four suites concurrently. Integration, STEP/DIR, and shared controller start first to overlap the longest simulations.
 Use `--jobs 1` (the default) for serial execution in the requested suite order.
 The final report keeps that order even when suites finish out of order. Each
 module suite uses separate temporary builds, pytest caches, logs, and XML results;
@@ -68,9 +67,8 @@ Each suite contains many directed cases:
 
 - Timebase and planner: standalone motion-building-block tests described in
   [the motion-planning contract](../docs/motion-planning.md), including Q8/Q16
-  equivalence and mirror-rule trapezoid/triangle coverage. The standalone compact planner
-  separately checks all 64 profiles, sentinel bounds, stable-config mode, transient
-  workspace sampling, mid-calculation aborts, and generated ROM reproducibility.
+  equivalence and mirror-rule trapezoid/triangle coverage. Generated ROM
+  reproducibility is checked alongside the shared controller tests.
 - Shared controller: both captured/stable configurations, all profiles and gain
   pairs, sampled input isolation, PI-only correction, cancellation, shared-ring
   restoration and completion within 2,000 clocks.

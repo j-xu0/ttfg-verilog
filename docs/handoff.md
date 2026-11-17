@@ -32,7 +32,7 @@ python3 scripts/measure_gf180_area.py --lib <LIB> --yosys $YS --abc $ABC \
   --output /tmp/area-X [--top MOD --source-dir DIR --parameter NAME=INT ...]
 ```
 
-Tests: `python3 -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py test/test_compact_planner.py test/test_pi.py test/test_step_dir.py test/test_shared_controller.py -q` then `make -C test -B` (8 integration tests, ~5 min). Shared-engine tests live in `test/test_shared_controller.py`.
+Tests: `python3 -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py test/test_pi.py test/test_step_dir.py test/test_shared_controller.py -q` then `make -C test -B` (8 integration tests, ~5 min). Shared-engine tests live in `test/test_shared_controller.py`.
 
 ## Measured numbers (GF180-mapped, same lib+flow throughout)
 

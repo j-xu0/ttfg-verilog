@@ -14,7 +14,7 @@ import time
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULES = ('spi', 'encoder', 'timebase', 'planner', 'compact_planner', 'pi',
+MODULES = ('spi', 'encoder', 'timebase', 'planner', 'pi',
            'step_dir', 'shared_controller')
 
 
@@ -142,7 +142,7 @@ def run_suites(suites, jobs, reporter, results=None):
         raise ValueError('jobs must be at least 1')
     results = [] if results is None else results
     # Put the longest suites on the critical path immediately in parallel mode.
-    priority = ('integration', 'step_dir', 'compact_planner', 'shared_controller')
+    priority = ('integration', 'step_dir', 'shared_controller')
     queue = deque(sorted(suites, key=lambda s: priority.index(s.name)
                          if s.name in priority else len(priority)) if jobs > 1 else suites)
     active = []
