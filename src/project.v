@@ -18,9 +18,10 @@ module tt_um_j_xu0_stepper (
 );
   wire signed [12:0] target, position;
   wire [2:0] plan;
-  wire miso, encoder_fault, write_pulse, reject_pulse, target_write_pulse;
+  wire miso, encoder_fault, write_pulse, target_write_pulse;
+  wire int_pending, frame_holds_motion, motion_event;
   (* async_reg = "true" *) reg enable_meta, enable_sync;
-  reg previous_sign;
+  reg previous_sign, busy_last;
   reg range_fault;
   wire fault_clear_pulse, zero_position_pulse, encoder_event;
   wire range_event = !zero_position_pulse &&
@@ -31,10 +32,15 @@ module tt_um_j_xu0_stepper (
   wire fault = encoder_fault || range_fault;
   // Raw low immediately inhibits pins; assertion still passes the synchronizer.
   wire run_allowed = rst_n && ena && ui_in[5] && enable_sync && !fault && !zero_position_pulse;
-  wire busy = active || (command_pending && run_allowed);
+  // A frame in flight freezes the launch instant so the BUSY bit returned by
+  // that same frame is the exact write verdict. busy_core stays ungated for
+  // edge detection, otherwise gating a queued command would look like a
+  // completion.
+  wire busy_core = active || (command_pending && run_allowed);
+  wire busy = active || (command_pending && run_allowed && !frame_holds_motion);
   wire at_target = settled && !active && !command_pending && run_allowed
                    && position == target;
-  wire launch = run_allowed && command_pending && !active;
+  wire launch = run_allowed && command_pending && !active && !frame_holds_motion;
   wire control_ce, planner_busy, planner_done, planner_calculating, pi_calculating;
   wire engine_calculating;
   wire signed [23:0] reference_position;
@@ -49,6 +55,7 @@ module tt_um_j_xu0_stepper (
       enable_meta <= 0;
       enable_sync <= 0;
       previous_sign <= 0;
+      busy_last <= 0;
       range_fault <= 0;
       command_pending <= 0;
       active <= 0;
@@ -59,6 +66,7 @@ module tt_um_j_xu0_stepper (
       enable_meta <= ui_in[5];
       enable_sync <= enable_meta;
       previous_sign <= position[12];
+      busy_last <= busy_core;
       // Each encoder update is at most one count, so sign plus the new
       // endpoint identifies either signed wrap without a second 13-bit counter.
       // Refuse wrap in the absolute coordinate system instead of making a
@@ -90,7 +98,8 @@ module tt_um_j_xu0_stepper (
         armed <= 1;
         settled <= 0;
         settle_count <= 0;
-      end else if (armed && !active && position != target) begin
+      end else if (armed && !active && position != target
+                   && !frame_holds_motion) begin
         active <= 1;
         settled <= 0;
         settle_count <= 0;
@@ -111,13 +120,14 @@ module tt_um_j_xu0_stepper (
   stepper_spi spi (
       .clk(clk), .rst_n(rst_n),
       .sclk(ui_in[0]), .cs_n(ui_in[1]), .mosi(ui_in[2]),
-      .busy(busy), .fault(fault), .at_target(at_target),
+      .busy(busy), .at_target(at_target),
       .fault_code({range_fault, encoder_fault}),
-      .fault_event(encoder_event || range_event), .motion_disabled(!ui_in[5]),
+      .fault_event(encoder_event || range_event),
+      .motion_event(motion_event), .motion_disabled(!ui_in[5]),
       .fault_clear_pulse(fault_clear_pulse), .zero_position_pulse(zero_position_pulse),
-      .miso(miso), .target(target), .plan(plan),
-      .write_pulse(write_pulse), .reject_pulse(reject_pulse),
-      .target_write_pulse(target_write_pulse)
+      .miso(miso), .frame_holds_motion(frame_holds_motion),
+      .int_pending(int_pending), .target(target), .plan(plan),
+      .write_pulse(write_pulse), .target_write_pulse(target_write_pulse)
   );
   quadrature_decoder encoder (
       .clk(clk), .rst_n(rst_n), .a(ui_in[3]), .b(ui_in[4]),
@@ -150,12 +160,15 @@ module tt_um_j_xu0_stepper (
       .fault(fault), .velocity_command(target_reached ? 14'sd0 : velocity_command),
       .step(step), .dir(dir), .driver_enable(driver_enable), .rate_limited(rate_limited)
   );
-  assign uo_out = {1'b0, (ena && rst_n && miso),
-      (ena && rst_n && fault), at_target,
-      (ena && rst_n && busy), driver_enable, (run_allowed && dir), step};
+  // The interrupt is a level held until a status read acknowledges it, so a
+  // slow or late MCU cannot miss an event. Status is read over SPI only.
+  assign motion_event = busy_last && !busy_core;
+  assign uo_out = {1'b0, (ena && rst_n && miso), 1'b0, 1'b0,
+      (ena && rst_n && int_pending), driver_enable,
+      (run_allowed && dir), step};
   assign uio_out = 8'h00;
   assign uio_oe = 8'h00;
-  wire _unused = &{ui_in[7:6], uio_in, write_pulse, reject_pulse, planner_done,
+  wire _unused = &{ui_in[7:6], uio_in, write_pulse, planner_done,
                    pi_saturated, rate_limited, pi_calculating, engine_calculating, 1'b0};
 endmodule
 `default_nettype wire

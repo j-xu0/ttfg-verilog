@@ -50,8 +50,9 @@ full-top measurement. Full ledger: [area budget](area.md).
 
 Ticks received while calculating are ignored, not queued. The interface allows
 2,000 clocks between accepted ticks; the unchanged 10 MHz/1 kHz integration
-provides 10,000 clocks. Gains/profile/target stay stable through work because
-SPI rejects busy writes. The standalone captured-input mode latches target and
+provides 10,000 clocks. Gains/profile/target stay stable through work because a
+frame whose returned status reports BUSY drops its write. The standalone
+captured-input mode latches target and
 profile at start and gains at the accepted tick. `start_position` carries live
 encoder feedback at each tick as well as the measured origin at launch.
 

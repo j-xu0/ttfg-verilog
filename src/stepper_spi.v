@@ -12,19 +12,24 @@
 // Write 0xE000 zeros position/target only while motion is disabled.
 // Writes commit only after CS rises. No partial frame can write.
 // Every frame returns a status snapshot captured when synchronized CS falls:
-// {1'b0, busy, at_target, fault, 10'b0, range_fault, encoder_fault}.
-// Complete reads (write=0, address/payload ignored) acknowledge faults unless
-// a new event arrived during the frame. Writes never acknowledge faults. MISO is zero while idle.
+// {1'b0, busy, at_target, 11'b0, range_fault, encoder_fault}. The snapshot
+// BUSY bit is the write verdict: a write is accepted only when it reads zero,
+// because frame_holds_motion freezes motion starts for the whole frame.
+// Complete reads (write=0, address/payload ignored) acknowledge faults and
+// the interrupt latch unless a new event arrived during the frame. Writes
+// never acknowledge. MISO is zero while idle.
 module stepper_spi (
     input wire clk, rst_n,
     input wire sclk, cs_n, mosi,
-    input wire busy, fault, at_target,
+    input wire busy, at_target,
     input wire [1:0] fault_code,
-    input wire fault_event, motion_disabled,
+    input wire fault_event, motion_event, motion_disabled,
     output wire miso,
+    output wire frame_holds_motion,
+    output reg int_pending,
     output reg signed [12:0] target,
     output reg [2:0] plan,
-    output reg write_pulse, reject_pulse,
+    output reg write_pulse,
     output reg fault_clear_pulse, zero_position_pulse,
     output reg target_write_pulse
 );
@@ -34,12 +39,18 @@ module stepper_spi (
     reg sclk_last, cs_last;
     reg [1:0] input_valid;
     reg cs_armed;
-    reg active, busy_seen;
-    reg fault_during_frame;
+    reg active, frame_busy, frame_write;
+    reg event_during_frame;
     reg [4:0] bit_count;
     reg [15:0] rx_shift, tx_shift;
 
     assign miso = active && !cs_sync ? tx_shift[15] : 1'b0;
+
+    // Hold motion starts from synchronized CS assertion until CS releases.
+    // A frame is treated as a write until its first bit proves otherwise, so
+    // the snapshot BUSY bit cannot disagree with the write decision. A queued
+    // command therefore cannot begin moving in the middle of a write frame.
+    assign frame_holds_motion = cs_armed && !cs_sync && frame_write;
 
     // All 16 receive bits are overwritten before a frame may commit. Short,
     // empty, overlong and reset-aborted frames never expose this scratch data,
@@ -62,8 +73,10 @@ module stepper_spi (
             input_valid <= 2'b00;
             cs_armed <= 1'b0;
             active <= 1'b0;
-            fault_during_frame <= 1'b0;
-            busy_seen <= 1'b0;
+            frame_busy <= 1'b0;
+            frame_write <= 1'b1;
+            event_during_frame <= 1'b0;
+            int_pending <= 1'b0;
             bit_count <= 5'd0;
             tx_shift <= 16'd0;
             target <= 13'sd0;
@@ -72,7 +85,6 @@ module stepper_spi (
             target_write_pulse <= 1'b0;
             fault_clear_pulse <= 1'b0;
             zero_position_pulse <= 1'b0;
-            reject_pulse <= 1'b0;
         end else begin
             input_valid <= {input_valid[0], 1'b1};
             // Ignore reset values in the CS synchronizer. Only an actual
@@ -91,33 +103,36 @@ module stepper_spi (
             target_write_pulse <= 1'b0;
             fault_clear_pulse <= 1'b0;
             zero_position_pulse <= 1'b0;
-            reject_pulse <= 1'b0;
 
-            if (active && fault_event) fault_during_frame <= 1'b1;
+            // A fault or a completed move inside a read frame makes that
+            // frame stale, so its read must acknowledge nothing and the host
+            // must poll again.
+            if (active && (fault_event || motion_event))
+                event_during_frame <= 1'b1;
             if (cs_armed && cs_last && !cs_sync) begin
                 active <= 1'b1;
-                busy_seen <= busy;
+                frame_busy <= busy;
+                frame_write <= 1'b1;
                 bit_count <= 5'd0;
-                fault_during_frame <= fault_event;
-                tx_shift <= {1'b0, busy, at_target, fault, 10'd0, fault_code};
+                event_during_frame <= fault_event || motion_event;
+                tx_shift <= {1'b0, busy, at_target, 11'd0, fault_code};
             end else if (!cs_last && cs_sync) begin
                 active <= 1'b0;
-                if (active && bit_count != 0) begin
-                    if (bit_count != 16) begin
-                        reject_pulse <= 1'b1;
-                    end else if (!rx_shift[15]) begin
-                        if (!fault_during_frame && !fault_event)
+                if (active && bit_count == 5'd16) begin
+                    if (!rx_shift[15]) begin
+                        if (!event_during_frame && !fault_event && !motion_event) begin
                             fault_clear_pulse <= 1'b1;
-                    end else if (busy_seen || busy) begin
-                        reject_pulse <= 1'b1;
-                    end else if (rx_shift[15]) begin
+                            int_pending <= 1'b0;
+                        end
+                    end else if (!frame_busy) begin
                         case (rx_shift[14:13])
                             2'd0: begin
                                 target <= rx_shift[12:0];
                                 write_pulse <= 1'b1;
                                 target_write_pulse <= 1'b1;
                             end
-                            2'd1: reject_pulse <= 1'b1;
+                            // Reserved address: silently ignored.
+                            2'd1: ;
                             2'd2: begin
                                 plan <= rx_shift[2:0];
                                 write_pulse <= 1'b1;
@@ -127,14 +142,19 @@ module stepper_spi (
                                     zero_position_pulse <= 1'b1;
                                     target <= 0;
                                     write_pulse <= 1'b1;
-                                end else reject_pulse <= 1'b1;
+                                end
+                                // Illegal zero command: silently ignored.
                             end
                         endcase
                     end
+                    // A frame that read BUSY is dropped without side effects.
+                    // The host already has that same BUSY bit and must retry.
                 end
             end else if (active && !cs_sync) begin
-                busy_seen <= busy_seen || busy;
                 if (!sclk_last && sclk_sync) begin
+                    // First sampled bit is the write/read flag for the gate.
+                    if (bit_count == 5'd0)
+                        frame_write <= mosi_sync;
                     // Saturation ensures even a very long frame cannot wrap
                     // the counter back to the valid length.
                     if (bit_count < 17)
@@ -143,6 +163,12 @@ module stepper_spi (
                 if (sclk_last && !sclk_sync)
                     tx_shift <= {tx_shift[14:0], 1'b0};
             end
+
+            // Events always raise the interrupt, even on the frame that is
+            // acknowledging an older one; the host polls again when INT stays
+            // high.
+            if (fault_event || motion_event)
+                int_pending <= 1'b1;
         end
     end
 endmodule

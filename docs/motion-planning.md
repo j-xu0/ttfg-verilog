@@ -15,8 +15,10 @@ stops motion rather than causing a full-range correction.
 Configure PLAN, then write TARGET. Every accepted TARGET commit is
 a command, including a repeated value. A command written while motion is disabled
 is queued until enable. TARGET starts a trajectory at the measured position.
-All register writes are rejected if busy occurs at any point during their SPI
-frame; status reads remain available. Busy includes planning, feedback correction,
+All register writes are dropped when the status word returned by their own SPI
+frame reports BUSY; status reads remain available, and motion starts are held
+for the duration of a frame so that bit is an exact verdict. Busy includes
+planning, feedback correction,
 and settling. A stall without feedback leaves busy asserted until disable/reset.
 
 Motion enable assertion is synchronized. Raw low, `ena=0`, reset, or a sticky
@@ -28,7 +30,7 @@ controller reset synchronously. Motion-pin suppression is immediate and does not
 wait for engine state to clear.
 
 A completed trajectory must have exact encoder feedback at the target for four
-control samples before At target asserts and Busy clears. The P command is cleared at
+control samples before the at-target status bit asserts and busy clears. The P command is cleared at
 the final reference/feedback match. The pulse generator receives zero velocity,
 finishes its normal active pulse, and ENABLE drops after settling. There is no
 idle holding torque. Feedback drift while enabled clears At target and reactivates
@@ -94,7 +96,7 @@ the 24-bit reference covers the whole legal position range and doubles as
 scratch for the signed remaining distance during the brake decision.
 
 **Current 1x1 restriction.** `vmax` is fixed at 8191; acceleration is the 3-bit PLAN
-code; SPI addr 1 (ex-CONTROL) is reserved and rejected.
+code; SPI addr 1 (ex-CONTROL) is reserved and silently ignored.
 
 The brake sum is maintained **exactly** in Q11 as `S(s) = s + S(s-a)`:
 accelerating to `s'` adds `s'`, holding at `s` leaves `S` unchanged, decelerating
@@ -154,7 +156,7 @@ then starts planner advancement, completing within 2,000 clocks before the next
 reference and sampled encoder value, without velocity feedforward or an integral.
 Target/settling logic does not consume workspace;
 it uses planner busy/calculation status and integer target/feedback equality.
-Planner inputs remain stable while busy because SPI rejects writes. This permits
+Planner inputs remain stable while busy because a BUSY frame drops its write. This permits
 `STABLE_CONFIG=1` to omit redundant target/profile registers. Disable/reset
 cancels an unfinished calculation; the next command starts from measured position.
 

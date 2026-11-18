@@ -1,9 +1,10 @@
 # Area budget: how the design fits 1x1
 
-The allocation is 1x1: core **51,966.970 um²**. The current tip
+The allocation is 1x1: core **51,966.970 um²**. The last measured tip
 (`exp/p-only-fixed-kp`) fits it. CI run
 [`44132561693`](https://github.com/j-xu0/ttfg-verilog/actions/runs/44132561693)
-on commit `2ed4e39`:
+on commit `2ed4e39` (this measurement predates the SPI status and interrupt
+change, which is expected to be area-neutral but is not yet re-measured):
 
 | Metric | Value |
 | --- | ---: |

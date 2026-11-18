@@ -44,9 +44,9 @@ pinout:
   uo[0]: "STEP"
   uo[1]: "DIR"
   uo[2]: "ENABLE"
-  uo[3]: "Busy"
-  uo[4]: "At target"
-  uo[5]: "Encoder fault"
+  uo[3]: "Interrupt"
+  uo[4]: ""
+  uo[5]: ""
   uo[6]: "SPI MISO"
   uo[7]: ""
 

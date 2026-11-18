@@ -14,10 +14,13 @@ external STEP/DIR motor driver.
 **Closed-loop RTL is implemented:** SPI command registers, synchronized encoder
 feedback, a Q11 trapezoidal planner, a fixed-gain P stage, and timed
 STEP/DIR/ENABLE outputs. TARGET commands drive motion in simulation, correct
-missed steps and disturbances, and report busy/settled/fault status.
+missed steps and disturbances, and report busy/at-target/fault status over SPI,
+with one interrupt output for repolling.
 
-**The 1x1 tapeout build now hardens and passes precheck** (CI run
-`44132561693`: 0 DRT violations, minimum feasible density 0.8300). Post-layout
+**The 1x1 tapeout build hardened and passed precheck** (CI run
+`44132561693`: 0 DRT violations, minimum feasible density 0.8300) before the SPI
+status/interrupt change; that change is expected to be area-neutral and needs a
+fresh CI run. Post-layout
 timing signoff, gate-level harness X handling (`2fa46ad` stops the X at source in
 the planner bit index; the bench still needs a guard), and hardware tuning remain.
 

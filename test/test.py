@@ -10,6 +10,15 @@ from cocotb.utils import get_sim_time
 
 _pins = 2
 
+# Status word returned by every SPI frame: {0, BUSY, AT_TARGET, 11'b0, codes}.
+STATUS_BUSY = 0x4000
+STATUS_AT_TARGET = 0x2000
+STATUS_ENC_FAULT = 0x0001
+STATUS_RANGE_FAULT = 0x0002
+STATUS_FAULT = STATUS_ENC_FAULT | STATUS_RANGE_FAULT
+INT_PIN = 0x08
+MOTOR_PINS = 0x07
+
 
 async def initialize(dut):
     global _pins
@@ -30,9 +39,13 @@ def set_input(dut, bit, value):
     dut.ui_in.value = _pins
 
 
-async def spi_frame(dut, word, count=16):
+async def spi_begin(dut):
     set_input(dut, 1, 0)
     await Timer(1000, unit="ns")
+
+
+async def spi_bits(dut, word, count=16):
+    """Clock `count` bits of `word`, MSB first, returning the reply bits."""
     response = 0
     for bit in range(count - 1, -1, -1):
         set_input(dut, 2, (word >> bit) & 1)
@@ -43,8 +56,18 @@ async def spi_frame(dut, word, count=16):
         await Timer(1000, unit="ns")
         set_input(dut, 0, 0)
     await Timer(1000, unit="ns")
+    return response
+
+
+async def spi_end(dut):
     set_input(dut, 1, 1)
     await Timer(1000, unit="ns")
+
+
+async def spi_frame(dut, word, count=16):
+    await spi_begin(dut)
+    response = await spi_bits(dut, word, count)
+    await spi_end(dut)
     return response
 
 
@@ -60,20 +83,22 @@ async def ports_status_and_reset(dut):
     # remain inputs; TARGET is queued until motion enable is asserted.
     for command in (0x8FFF, 0xA00F, 0xC03F):
         await spi_frame(dut, command)
-        assert int(dut.uo_out.value) & 0xBF == 0
+        assert int(dut.uo_out.value) & 0x7F == 0
         assert int(dut.uio_oe.value) == 0
 
-    # A legal cycle has no fault; a diagonal transition reports a sticky fault.
+    # A legal cycle has no fault; a diagonal transition latches one and holds
+    # the interrupt until a read acknowledges it.
     for phase in (1, 3, 2, 0):
         set_input(dut, 3, phase >> 1)
         set_input(dut, 4, phase & 1)
         await Timer(1000, unit="ns")
-        assert int(dut.uo_out.value) & 0x20 == 0
+        assert not int(dut.uo_out.value) & INT_PIN
     set_input(dut, 3, 1)
     set_input(dut, 4, 1)
     await Timer(1000, unit="ns")
-    assert int(dut.uo_out.value) == 0x20
-    assert await spi_frame(dut, 0) == 0x1001
+    assert int(dut.uo_out.value) & INT_PIN
+    assert await spi_frame(dut, 0) == STATUS_ENC_FAULT
+    assert not int(dut.uo_out.value) & INT_PIN
 
     dut.ena.value = 0
     await Timer(1000, unit="ns")
@@ -164,10 +189,11 @@ class MotorModel:
 
 async def wait_settled(dut, timeout_us=150000):
     for _ in range(timeout_us // 100):
-        pins = int(dut.uo_out.value)
-        assert not pins & 0x20, "unexpected feedback fault"
-        if pins & 0x10:
-            assert not pins & 0x09, "settled with busy/STEP asserted"
+        word = await spi_frame(dut, 0)
+        assert not word & STATUS_FAULT, "unexpected feedback fault"
+        if word & STATUS_AT_TARGET:
+            assert not word & STATUS_BUSY, "settled while busy"
+            assert not int(dut.uo_out.value) & 0x01, "settled with STEP asserted"
             return
         await Timer(100, unit="us")
     raise AssertionError("move did not settle within motor-model timeout")
@@ -182,29 +208,32 @@ async def closed_loop_moves_and_disturbance(dut):
     await spi_frame(dut, 0xC03F)  # 10000 steps/s, ~100000 steps/s^2
     await spi_frame(dut, 0x8004)  # configure target while disabled
     await Timer(100, unit="us")
-    assert int(dut.uo_out.value) & 0x1F == 0
+    assert int(dut.uo_out.value) & MOTOR_PINS == 0
+    assert not int(dut.uo_out.value) & INT_PIN
     motor.drop_next = True
     set_input(dut, 5, 1)
     await Timer(1, unit="us")
-    assert int(dut.uo_out.value) & 8
-    assert await spi_frame(dut, 0) & 0x4000
-    await spi_frame(dut, 0x8007)  # rejected while busy, must still land at 4
+    assert int(dut.uo_out.value) & 0x04
+    assert await spi_frame(dut, 0) & STATUS_BUSY
+    # A write whose own returned status word says BUSY is dropped; the frame
+    # freezes motion starts, so that bit is the exact verdict.
+    await spi_frame(dut, 0x8007)
     await wait_settled(dut)
     assert motor.position == 4
     assert motor.steps >= 5, "missed step was not corrected"
-    assert await spi_frame(dut, 0) == 0x2000
+    assert await spi_frame(dut, 0) == STATUS_AT_TARGET
 
     # Regression: accepting a new TARGET after settle must launch a new plan,
     # rather than interpreting the new target as drift from the old reference.
     await spi_frame(dut, 0x8000 | ((-3) & 0x1FFF))
     await Timer(1, unit="us")
-    assert int(dut.uo_out.value) & 8
+    assert int(dut.uo_out.value) & 0x04
     await wait_settled(dut)
     assert motor.position == -3
     steps_before = motor.steps
     motor.advance(1)  # external shaft disturbance after settling
     await Timer(1, unit="us")
-    assert not int(dut.uo_out.value) & 0x10
+    assert await spi_frame(dut, 0) & STATUS_BUSY
     await wait_settled(dut)
     assert motor.position == -3
     assert motor.steps > steps_before
@@ -218,6 +247,39 @@ async def closed_loop_moves_and_disturbance(dut):
     assert int(dut.uio_out.value) == 0
 
 
+@cocotb.test(skip=os.environ.get("GATES") == "yes")
+async def write_frame_freezes_queued_launch(dut):
+    """A queued TARGET cannot start inside a write frame, so that frame's own
+    BUSY bit is the exact write verdict."""
+    await initialize(dut)
+    top = dut.user_project
+    motor = MotorModel(dut)
+    cocotb.start_soon(motor.run())
+    await spi_frame(dut, 0xC03F)
+    await spi_frame(dut, 0x8004)  # queue +4 while disabled
+    await Timer(10, unit="us")
+    assert int(top.command_pending.value) == 1
+    assert int(top.busy.value) == 0
+
+    await spi_begin(dut)
+    high = await spi_bits(dut, (0x8000 | 8) >> 8, count=8)
+    # Motion enable rises with the write frame still in flight. Without the
+    # gate this is the instant the queued +4 would have armed.
+    set_input(dut, 5, 1)
+    await Timer(5, unit="us")
+    assert int(top.active.value) == 0, "queued move started inside write frame"
+    assert int(top.busy.value) == 0, "BUSY rose inside write frame"
+    low = await spi_bits(dut, (0x8000 | 8) & 0xFF, count=8)
+    await spi_end(dut)
+    assert (high << 8 | low) & STATUS_BUSY == 0
+    await Timer(10, unit="us")
+    # The in-frame write won: the queued +4 was replaced by +8.
+    assert int(top.target.value) == 8
+    await wait_settled(dut)
+    assert motor.position == 8
+    assert await spi_frame(dut, 0) == STATUS_AT_TARGET
+
+
 @cocotb.test()
 async def motion_abort_and_fault(dut):
     await initialize(dut)
@@ -225,29 +287,34 @@ async def motion_abort_and_fault(dut):
     await spi_frame(dut, 0x800A)
     set_input(dut, 5, 1)
     await Timer(4, unit="ms")
-    assert int(dut.uo_out.value) & 8
+    assert int(dut.uo_out.value) & 0x04
     # A disable does not resume the aborted command on the next enable.
     set_input(dut, 5, 0)
     await Timer(10, unit="ns")
-    assert int(dut.uo_out.value) & 7 == 0
+    assert int(dut.uo_out.value) & MOTOR_PINS == 0
     await Timer(1, unit="us")
     set_input(dut, 5, 1)
     await Timer(2, unit="ms")
-    assert int(dut.uo_out.value) & 0x1F == 0
+    # The abort holds the interrupt until a read consumes the status word.
+    assert int(dut.uo_out.value) & INT_PIN
+    assert await spi_frame(dut, 0) == 0
+    assert not int(dut.uo_out.value) & INT_PIN
     await spi_frame(dut, 0x800A)  # explicit rewrite required
     await Timer(2, unit="us")
-    assert int(dut.uo_out.value) & 8
+    assert int(dut.uo_out.value) & 0x04
     # Illegal two-bit encoder transition latches a fault and stops outputs.
     set_input(dut, 3, 1)
     set_input(dut, 4, 1)
     await Timer(1, unit="us")
-    assert int(dut.uo_out.value) & 0x27 == 0x20
-    assert await spi_frame(dut, 0) == 0x1001
+    assert int(dut.uo_out.value) & MOTOR_PINS == 0
+    assert int(dut.uo_out.value) & INT_PIN
+    assert await spi_frame(dut, 0) == STATUS_ENC_FAULT
     await Timer(2, unit="us")
-    assert int(dut.uo_out.value) & 0x3F == 0
+    assert int(dut.uo_out.value) & MOTOR_PINS == 0
+    assert not int(dut.uo_out.value) & INT_PIN
     await spi_frame(dut, 0x8001)
     await Timer(2, unit="us")
-    assert int(dut.uo_out.value) & 8
+    assert int(dut.uo_out.value) & 0x04
     dut.rst_n.value = 0
     await Timer(1, unit="us")
     assert int(dut.uo_out.value) == 0
@@ -266,8 +333,8 @@ async def absolute_encoder_range_fault(dut):
         set_input(dut, 3, phase >> 1)
         set_input(dut, 4, phase & 1)
         await Timer(1, unit="us")
-    assert int(dut.uo_out.value) == 0x20
-    assert await spi_frame(dut, 0) == 0x1002
+    assert int(dut.uo_out.value) & INT_PIN
+    assert await spi_frame(dut, 0) == STATUS_RANGE_FAULT
 
     # Negative endpoint itself is valid; one further decrement must fault.
     dut.rst_n.value = 0
@@ -279,14 +346,14 @@ async def absolute_encoder_range_fault(dut):
         set_input(dut, 3, phase >> 1)
         set_input(dut, 4, phase & 1)
         await Timer(1, unit="us")
-    assert int(dut.uo_out.value) == 0
+    assert not int(dut.uo_out.value) & INT_PIN
     set_input(dut, 3, 1)  # 00 -> 10 decrements once more and wraps
     await Timer(1, unit="us")
-    assert int(dut.uo_out.value) == 0x20
+    assert int(dut.uo_out.value) & INT_PIN
     set_input(dut, 5, 1)
-    await spi_frame(dut, 0x8001)
+    await spi_frame(dut, 0x8001)  # writes never acknowledge
     await Timer(1, unit="ms")
-    assert int(dut.uo_out.value) == 0x20
+    assert int(dut.uo_out.value) & INT_PIN
 
 
 @cocotb.test()
@@ -408,7 +475,7 @@ async def shared_engine_abort_phases(dut):
             set_input(dut, 5, 1)
             # A cancelled move needs a fresh TARGET, even after two ticks.
             await Timer(2100, unit="us")
-            assert int(dut.uo_out.value) & 0x1F == 0
+            assert int(dut.uo_out.value) & MOTOR_PINS == 0
             set_input(dut, 5, 0)
             await Timer(1000, unit="ns")
 
@@ -430,13 +497,13 @@ async def spi_init_short_move(dut):
     await spi_frame(dut, 0xC03F)  # PLAN: 10000 steps/s, ~100000 steps/s^2
     await spi_frame(dut, 0x8040)  # TARGET: +64 steps, queued while disabled
     await Timer(100, unit="us")
-    assert int(dut.uo_out.value) & 0x1F == 0, "disabled setup drove pins"
+    assert int(dut.uo_out.value) & MOTOR_PINS == 0, "disabled setup drove pins"
 
     set_input(dut, 5, 1)  # motion enable launches the queued TARGET
     await wait_settled(dut, timeout_us=100000)
     assert motor.position == 64
     assert motor.steps == 64, f"expected one STEP per step, saw {motor.steps}"
-    assert await spi_frame(dut, 0) == 0x2000  # at target, not busy/fault
+    assert await spi_frame(dut, 0) == STATUS_AT_TARGET
 
     gaps = [b - a for a, b in zip(motor.rises, motor.rises[1:])]
     assert len(gaps) >= 4, f"too few STEP pulses to show a profile: {gaps}"
@@ -456,23 +523,23 @@ async def fault_acknowledge_and_zero_position(dut):
     set_input(dut, 4, 1)
     await Timer(1, unit="us")
     # Writes and truncated reads cannot acknowledge. Fault report is bit-coded.
-    assert await spi_frame(dut, 0xC001) == 0x1001
+    assert await spi_frame(dut, 0xC001) == STATUS_ENC_FAULT
     await spi_frame(dut, 0, count=15)
-    assert int(dut.uo_out.value) & 0x20
-    assert await spi_frame(dut, 0) == 0x1001
-    assert not int(dut.uo_out.value) & 0x20
+    assert int(dut.uo_out.value) & INT_PIN
+    assert await spi_frame(dut, 0) == STATUS_ENC_FAULT
+    assert not int(dut.uo_out.value) & INT_PIN
     # Fault acknowledgement preserves the four legal counts.
     set_input(dut, 5, 1)
     await spi_frame(dut, 0x8004)
     await wait_settled(dut)
     # Zero is rejected while enabled, even if settled.
     await spi_frame(dut, 0xE000)
-    assert await spi_frame(dut, 0) == 0x2000
+    assert await spi_frame(dut, 0) == STATUS_AT_TARGET
     set_input(dut, 5, 0)
     await Timer(1, unit="us")
     await spi_frame(dut, 0xE000)
     set_input(dut, 5, 1)
     await Timer(1, unit="us")
-    assert int(dut.uo_out.value) & 0x1F == 0
+    assert int(dut.uo_out.value) & MOTOR_PINS == 0
     await spi_frame(dut, 0x8000)
     await wait_settled(dut)
