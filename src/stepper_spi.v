@@ -11,16 +11,19 @@
 // code only; velocity is fixed). Address 1 is reserved.
 // Write 0xE000 zeros position/target only while motion_disabled stays high
 // from the sampled CS assertion through commit. The input is synchronous.
-// Writes commit only after CS rises. No partial frame can write.
-// Every frame returns a status snapshot captured when synchronized CS falls:
-// {1'b0, busy, at_target, 11'b0, range_fault, encoder_fault}. The snapshot
-// BUSY bit is the write verdict: a write is accepted only when it reads zero,
-// because frame_holds_motion freezes motion starts for the whole frame.
-// Complete reads (write=0, address/payload ignored) acknowledge faults and
-// the interrupt latch unless a new event arrived during the frame. Writes
-// never acknowledge. MISO is zero while idle.
+// The project must stay selected through frame completion; deselection aborts
+// the frame, so no commit and no acknowledgement can follow it. Writes commit
+// only after CS rises. No partial frame can write.
+// Each selected frame returns a status snapshot captured when synchronized CS
+// falls: {1'b0, busy, at_target, 11'b0, range_fault, encoder_fault}. The
+// snapshot BUSY bit is the write verdict: a write is accepted only when it
+// reads zero, because frame_holds_motion freezes motion starts for the whole
+// frame. Complete reads (write=0, address/payload ignored) acknowledge faults
+// and the interrupt latch unless a new event arrived during the frame. Writes
+// never acknowledge. MISO is zero while idle and while deselected.
 module stepper_spi (
     input wire clk, rst_n,
+    input wire selected,
     input wire sclk, cs_n, mosi,
     input wire busy, at_target,
     input wire [1:0] fault_code,
@@ -37,6 +40,7 @@ module stepper_spi (
     (* async_reg = "true" *) reg sclk_meta, sclk_sync;
     (* async_reg = "true" *) reg cs_meta, cs_sync;
     (* async_reg = "true" *) reg mosi_meta, mosi_sync;
+    (* async_reg = "true" *) reg selected_meta, selected_sync;
     reg sclk_last, cs_last;
     reg [1:0] input_valid;
     reg cs_armed;
@@ -47,6 +51,20 @@ module stepper_spi (
     reg [4:0] bit_count;
     reg [15:0] rx_shift;
 
+    // Capture deselection even when the low interval falls between clocks, so a
+    // frame cannot outlive a deselect that happened between two edges. Release
+    // only after the selection synchronizer has settled.
+    wire selection_reset_n = rst_n && selected;
+    always @(posedge clk or negedge selection_reset_n) begin
+        if (!selection_reset_n) begin
+            selected_meta <= 1'b0;
+            selected_sync <= 1'b0;
+        end else begin
+            selected_meta <= 1'b1;
+            selected_sync <= selected_meta;
+        end
+    end
+
     wire event_now = fault_event || motion_event;
     // The snapshot is four bits, not a 16-bit shift image: the transmitted bit
     // is selected by frame position instead, which replaces the whole transmit
@@ -56,7 +74,7 @@ module stepper_spi (
                       bit_count == 5'd2 ? frame_at_target :
                       bit_count == 5'd14 ? frame_fault[1] :
                       bit_count == 5'd15 ? frame_fault[0] : 1'b0;
-    assign miso = active && !cs_sync ? status_bit : 1'b0;
+    assign miso = selected && active && !cs_sync ? status_bit : 1'b0;
 
     // Hold motion starts from synchronized CS assertion until CS releases.
     // A frame is treated as a write until its first bit proves otherwise, so
@@ -123,7 +141,12 @@ module stepper_spi (
             // must poll again.
             if (active && event_now)
                 event_during_frame <= 1'b1;
-            if (cs_armed && cs_last && !cs_sync) begin
+            // Align selection with sampled CS. Raw deselection aborts on
+            // the next clock, even while CS completion is in flight, so a
+            // frame the host never finished cannot acknowledge a fault.
+            if (!selected_sync) begin
+                active <= 1'b0;
+            end else if (cs_armed && cs_last && !cs_sync) begin
                 active <= 1'b1;
                 frame_busy <= busy;
                 frame_at_target <= at_target;
