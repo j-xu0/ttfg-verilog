@@ -15,4 +15,6 @@ Port to a new target by adding `platform/tinystep_platform_<name>.c` and configu
 (`platform/tinystep_platform_host.h`) that speaks the same frame protocol as the RTL, so the
 tests run with no hardware.
 
+Settled design decisions are in [DESIGN.md](DESIGN.md).
+
 `compile_commands.json` is generated in `hal/build/` and symlinked to `hal/`; both are gitignored.
