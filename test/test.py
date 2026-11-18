@@ -4,7 +4,7 @@ import os
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import Edge, FallingEdge, ReadOnly, RisingEdge, Timer
+from cocotb.triggers import Edge, FallingEdge, ReadOnly, RisingEdge, Timer, with_timeout
 from cocotb.utils import get_sim_time
 
 
@@ -324,6 +324,46 @@ async def motion_abort_and_fault(dut):
 
 
 @cocotb.test()
+async def subcycle_disable_during_step(dut):
+    await initialize(dut)
+    motor = MotorModel(dut)
+    cocotb.start_soon(motor.run())
+    await spi_frame(dut, 0xC007)
+    await spi_frame(dut, 0x8040)
+    set_input(dut, 5, 1)
+
+    async def wait_step():
+        while True:
+            await Edge(dut.uo_out)
+            if int(dut.uo_out.value) & 1:
+                return
+
+    await with_timeout(wait_step(), 20, "ms")
+    await FallingEdge(dut.clk)
+    await Timer(10, unit="ns")
+    assert int(dut.uo_out.value) & 0x05 == 0x05, "expected STEP with the driver enabled"
+    # The 20 ns low pulse fits between rising clocks, inside the high STEP.
+    set_input(dut, 5, 0)
+    await Timer(10, unit="ns")
+    assert int(dut.uo_out.value) & MOTOR_PINS == 0, "disable did not inhibit motor pins"
+    await Timer(10, unit="ns")
+    set_input(dut, 5, 1)
+    await Timer(10, unit="ns")
+    assert int(dut.uo_out.value) & MOTOR_PINS == 0, "STEP or driver pins reasserted before cleanup"
+    await Timer(5, unit="ms")
+    assert int(dut.uo_out.value) & MOTOR_PINS == 0
+    # The abort is a busy edge, so it raises the interrupt just as a completed
+    # move would; only a status read acknowledges it.
+    assert int(dut.uo_out.value) & INT_PIN
+    assert motor.steps == 1, "aborted move emitted another STEP"
+
+    # A fresh command still works after the abort.
+    await spi_frame(dut, 0x8004)
+    await wait_settled(dut)
+    assert motor.position == 4
+
+
+@cocotb.test()
 async def absolute_encoder_range_fault(dut):
     await initialize(dut)
     # Deliberately cross +4095 -> -4096 using legal transitions while disabled.
@@ -543,3 +583,53 @@ async def fault_acknowledge_and_zero_position(dut):
     assert int(dut.uo_out.value) & MOTOR_PINS == 0
     await spi_frame(dut, 0x8000)
     await wait_settled(dut)
+
+
+@cocotb.test(skip=os.environ.get("GATES") == "yes")
+async def zero_position_requires_synchronized_disable(dut):
+    await initialize(dut)
+    top = dut.user_project
+    set_input(dut, 4, 1)  # One legal encoder count, no TARGET queued.
+    await Timer(1, unit="us")
+    assert int(top.position.value) == 1
+
+    set_input(dut, 5, 1)
+    await Timer(1, unit="us")
+    await spi_begin(dut)
+    assert await spi_bits(dut, 0xE000) == 0
+    set_input(dut, 1, 1)
+    # CS commits on the third rising edge. Pull enable low after the
+    # second edge, too late for the disable to reach the SPI clock domain.
+    await RisingEdge(dut.clk)
+    await RisingEdge(dut.clk)
+    await Timer(20, unit="ns")
+    set_input(dut, 5, 0)
+    await Timer(1, unit="us")
+    assert int(top.position.value) == 1, "late raw disable authorized zeroing"
+
+    await spi_begin(dut)
+    assert await spi_bits(dut, 0xE000) == 0
+    set_input(dut, 5, 1)
+    await Timer(1, unit="us")
+    set_input(dut, 5, 0)
+    await Timer(1, unit="us")
+    set_input(dut, 1, 1)
+    await Timer(1, unit="us")
+    assert int(top.position.value) == 1, "enable during frame authorized zeroing"
+
+    await spi_begin(dut)
+    assert await spi_bits(dut, 0xE000) == 0
+    set_input(dut, 5, 1)
+    set_input(dut, 1, 1)
+    await Timer(1, unit="us")
+    assert int(top.position.value) == 1, "enable at commit authorized zeroing"
+
+    set_input(dut, 5, 0)
+    await Timer(400, unit="ns")
+    await spi_frame(dut, 0x8004)
+    assert int(top.target.value) == 4
+    assert int(top.command_pending.value)
+    await spi_frame(dut, 0xE000)
+    assert int(top.position.value) == 0
+    assert int(top.target.value) == 0
+    assert not int(top.command_pending.value)

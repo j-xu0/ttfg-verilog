@@ -21,10 +21,13 @@ for the duration of a frame so that bit is an exact verdict. Busy includes
 planning, feedback correction,
 and settling. A stall without feedback leaves busy asserted until disable/reset.
 
-Motion enable assertion is synchronized. Raw low, `ena=0`, reset, or a sticky
-fault inhibits STEP/ENABLE immediately. Disable aborts, clears controller state,
-and discards the active command; re-enabling requires a new TARGET write. A target
-written while faulted cannot cause motion. Fault recovery uses a complete explicit SPI read; see `fault-recovery.md`.
+Pulling motion enable (`ui_in[5]`) low inhibits STEP/ENABLE immediately and
+can truncate a high STEP pulse. The inhibit remains asserted until enable is
+high for two rising clock edges, giving the controller time to clear the active
+command even when no clock edge samples the low input. A fresh TARGET write is
+required to move again. `ena=0`, reset, and sticky faults also inhibit STEP/ENABLE
+immediately. A target written while faulted cannot cause motion. Fault recovery
+uses a complete explicit SPI read. See [Fault reporting and host recovery](fault-recovery.md).
 Hold reset across at least one rising clock edge because the planner and P
 controller reset synchronously. Motion-pin suppression is immediate and does not
 wait for engine state to clear.
