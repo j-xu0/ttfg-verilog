@@ -70,14 +70,14 @@ async def frame(dut, word, count=16, writes=0, rejects=0):
 
 
 def registers(dut):
-    return (int(dut.target.value), int(dut.control.value), int(dut.plan.value))
+    return (int(dut.target.value), int(dut.plan.value))
 
 
 @cocotb.test()
 async def spi_contract(dut):
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     await reset(dut)
-    assert registers(dut) == (0, 0, 0)
+    assert registers(dut) == (0, 0)
     assert int(dut.miso.value) == 0
 
     # Exercise signed endpoints and register isolation/masking.
@@ -87,15 +87,17 @@ async def spi_contract(dut):
         await bits(dut, 0x8000 | payload)
         assert registers(dut) == old, "must wait for CS deassertion"
         assert await finish(dut, writes=1) == 1
-        assert registers(dut) == (payload, 0, 0)
-    await frame(dut, 0xA000 | 0x1FFA, writes=1)
-    assert registers(dut) == (8191, 10, 0)
+        assert registers(dut) == (payload, 0)
+    # Addr 1 is reserved after CONTROL removal.
+    await frame(dut, 0xA000 | 0x1FFA, rejects=1)
+    assert registers(dut) == (8191, 0)
     await frame(dut, 0xC000 | 0x1FD5, writes=1)
-    assert registers(dut) == (8191, 10, 21)
+    assert registers(dut) == (8191, 5)
     saved = registers(dut)
 
     # Reserved writes, every truncated length, and long frames cannot write.
     await frame(dut, 0xFFFF, rejects=1)
+    await frame(dut, 0xBFFF, rejects=1)
     for count in range(1, 16):
         await frame(dut, 0xFFFF, count=count, rejects=1)
         assert registers(dut) == saved
@@ -158,19 +160,19 @@ async def spi_contract(dut):
     await cycles(dut, 5)
     await bits(dut, 0x8123)
     await finish(dut)
-    assert registers(dut) == (0, 0, 0)
+    assert registers(dut) == (0, 0)
     await frame(dut, 0x8009, writes=1)
-    assert registers(dut) == (9, 0, 0)
+    assert registers(dut) == (9, 0)
 
     # Reset aborts an in-flight frame and clears all persistent registers.
     await begin(dut)
     await bits(dut, 0xFF, count=8)
     await reset(dut)
-    assert registers(dut) == (0, 0, 0)
+    assert registers(dut) == (0, 0)
     assert int(dut.write_pulse.value) == 0
     assert int(dut.reject_pulse.value) == 0
     await frame(dut, 0x8007, writes=1)
-    assert registers(dut) == (7, 0, 0)
+    assert registers(dut) == (7, 0)
 
 
 def test_spi(tmp_path):

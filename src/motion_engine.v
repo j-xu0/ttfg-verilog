@@ -10,7 +10,7 @@
 module motion_engine #(parameter integer STABLE_CONFIG=0) (
     input wire clk, rst_n, enable, start, tick,
     input wire signed [12:0] start_position, target_position,
-    input wire [5:0] plan_code,
+    input wire [2:0] plan_code,
     output reg signed [23:0] reference_position,
     output wire signed [13:0] reference_velocity,
     output reg planner_busy, planner_done,
@@ -31,9 +31,9 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
     reg [3:0] operand_a, operand;
     reg [1:0] carry;
     reg subtract;
-    reg [5:0] latched_profile;
+    reg [2:0] latched_profile;
     reg signed [12:0] latched_goal;
-    wire [5:0] profile = STABLE_CONFIG != 0 ? plan_code : latched_profile;
+    wire [2:0] profile = STABLE_CONFIG != 0 ? plan_code : latched_profile;
     wire signed [12:0] goal = STABLE_CONFIG != 0 ? target_position : latched_goal;
     reg negative, source_position_sign;
     reg [12:0] speed;
@@ -68,9 +68,10 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
         endcase
     end
     // EXPERIMENT: fixed maximum velocity, acceleration still plan-selected.
-    wire [12:0] profile_limit = 13'd8191;
-    assign vmax = profile_limit;
-    wire [10:0] accel = profile_acceleration(profile[5:3]);
+    // Single source of truth; all three uses below are the same ceiling.
+    localparam [12:0] VMAX = 13'd8191;
+    assign vmax = VMAX;
+    wire [10:0] accel = profile_acceleration(profile);
     wire signed [12:0] pos_int = reference_position[23:11];
     wire signed [23:0] goal_q11 = {goal, 11'b0};
     // The full position register rotates during every position pass; DIST and
@@ -82,7 +83,7 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
     wire [8:0] source_bits = {
         accumulator[0],
         bit_index < 24 ? stopping[0] : 1'b0,
-        bit_index < 13 ? profile_limit[bit_index] : 1'b0,
+        bit_index < 13 ? VMAX[bit_index] : 1'b0,
         goal_bit,
         bit_index < 24 ? position_bit : 1'b0,
         position_signed_bit,
@@ -128,7 +129,7 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
         end
     endtask
 
-    always @(posedge clk) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             reference_position <= 0; speed <= 0; planner_busy <= 0; planner_done <= 0;
             latched_profile <= 0; latched_goal <= 0; negative <= 0;
@@ -174,9 +175,9 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
                 // Decide against min(s+a, vmax): the accelerate candidate's
                 // speed is left in the accumulator for the brake sum.
                 CAP: begin
-                    capped <= accumulator[13:0] >= {1'b0, profile_limit};
-                    grow <= accumulator[13:0] < {1'b0, profile_limit} || speed < profile_limit;
-                    if (accumulator[13:0] >= {1'b0, profile_limit}) operation(1'b0,LOAD_LIMIT);
+                    capped <= accumulator[13:0] >= {1'b0, VMAX};
+                    grow <= accumulator[13:0] < {1'b0, VMAX} || speed < VMAX;
+                    if (accumulator[13:0] >= {1'b0, VMAX}) operation(1'b0,LOAD_LIMIT);
                     else operation(1'b0,TRIAL);
                 end
                 LOAD_LIMIT: operation(1'b0,TRIAL);

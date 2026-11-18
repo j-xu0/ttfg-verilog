@@ -131,9 +131,8 @@ class Harness:
 
     async def tick(self, measured, kp, disturb=True, control=True):
         old_ref, old_command = self.ref, self.command_output()
-        # The current engine experiment fixes vmax at 8191; acceleration is
-        # still selected by PLAN[5:3].
-        vmax, accel = 8191, ACCELS[self.code >> 3]
+        # Acceleration is selected by the 3-bit PLAN code.
+        vmax, accel = 8191, ACCELS[self.code]
         if control:
             self.p.update(old_ref[0], measured, old_ref[1], vmax, kp)
         else:
@@ -156,7 +155,7 @@ class Harness:
             self.put(start_position=4095 if measured != 4095 else -4096)
             if not self.stable:
                 self.put(kp_select=3-kp, target_position=~(self.goal//2048),
-                         plan_code=self.code ^ 63)
+                         plan_code=self.code ^ 7)
         elapsed = 1
         while int(self.dut.calculating.value):
             # The single-cycle P stage has already published; the serial
@@ -194,9 +193,9 @@ async def shared_numerical_contract(dut):
     h = Harness(dut)
     await h.reset()
     rng = random.Random(0x18051)
-    # Every velocity/acceleration profile, both directions, and every Kp code.
-    cases = [(0, 3, code) for code in range(64)] + [(2, -1, code) for code in range(64)]
-    cases += [(-4096, 4095, 63), (4095, -4096, 63), (4095, 4094, 0),
+    # Every acceleration profile, both directions, and every Kp code.
+    cases = [(0, 3, code) for code in range(8)] + [(2, -1, code) for code in range(8)]
+    cases += [(-4096, 4095, 7), (4095, -4096, 7), (4095, 4094, 0),
               (-4096, -4095, 7), (0, 0, 0)]
     for origin, target, code in cases:
         await h.launch(origin, target, code)
@@ -240,12 +239,12 @@ async def shared_cancellation_contract(dut):
         for abort in ("clear_control", "control_enable"):
             for offset in range(0, 128, 4):
                 await h.reset()
-                await h.launch(-2, 20 if moving else -2, 63)
+                await h.launch(-2, 20 if moving else -2, 7)
                 await h.tick(-3, 2)
                 old_ref = h.ref
                 if moving:
                     moved = advance(old_ref[0], old_ref[1], h.stopping, h.goal,
-                                    VELOCITIES[7], ACCELS[7], h.negative)
+                                    8191, ACCELS[7], h.negative)
                     expected = (moved[0], moved[1], int(moved[0] != h.goal))
                     expected_stopping = moved[2]
                 else:
@@ -277,7 +276,7 @@ async def shared_cancellation_contract(dut):
     # Global disable/reset aborts the move and clears the command.
     for abort in ("enable", "rst_n"):
         await h.reset()
-        await h.launch(-2, 20, 63)
+        await h.launch(-2, 20, 7)
         await h.tick(-3, 2)
         h.put(start_position=-4, tick=1, kp_select=1)
         await clocks()
@@ -299,7 +298,7 @@ async def shared_cancellation_contract(dut):
     # At a completed reference, feedback recovery is P-only and clear cancels
     # the correction without moving the reference.
     await h.reset()
-    await h.launch(3, 3, 63)
+    await h.launch(3, 3, 7)
     h.put(start_position=2, kp_select=3, tick=1)
     await clocks()
     h.put(tick=0)
@@ -317,7 +316,7 @@ async def shared_cancellation_contract(dut):
     await h.tick(2, 3)
     # A disabled controller may continue planning without producing P output.
     await h.reset()
-    await h.launch(0, 1, 63)
+    await h.launch(0, 1, 7)
     for _ in range(5):
         await h.tick(0, 3, control=False)
     assert h.command_output() == (0, 0)

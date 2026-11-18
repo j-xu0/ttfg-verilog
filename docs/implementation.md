@@ -6,7 +6,7 @@ choices needed to make that foundation testable.
 
 | Step | Deliverable | Verification | Status |
 | --- | --- | --- | --- |
-| 1 | Mode-0 SPI and TARGET/CONTROL/PLAN register bank | Framing, atomic writes, masking, status, busy rejection, reset | Implemented |
+| 1 | Mode-0 SPI and TARGET/PLAN register bank | Framing, atomic writes, masking, status, busy rejection, reset | Implemented |
 | 2 | Synchronized x4 quadrature decoder | Both directions, startup phases, illegal transitions, signed wrap, reset | Implemented |
 | 3 | GF180 top-level interface | 10 MHz/500 kHz integration, pin directions, fault/status/reset, motion pins | Implemented in RTL |
 | 4 | Timebase and trapezoidal planner | Reference model for acceleration/cruise/deceleration, reverse/short moves, range limits | Integrated shared planner/PI engine with profile LUT |

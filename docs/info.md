@@ -56,15 +56,14 @@ atomically after synchronized CS deassertion, never during a partial transfer.
 | Address | Name | Width | Reset | Interpretation |
 | --- | --- | --- | --- | --- |
 | 0 | TARGET | 13 | 0 | Signed two's-complement position, -4096 to 4095 |
-| 1 | CONTROL | 4 | 0 | Reserved; kP is fixed at the former code 1 |
-| 2 | PLAN | 6 | 0 | Upper three bits select acceleration; lower three reserved (vmax fixed) |
+| 1 | Reserved | - | - | Writes rejected (was CONTROL: fixed-Kp/Ki, removed for 1x1) |
+| 2 | PLAN | 3 | 0 | Acceleration code 0-7 only; velocity fixed at 8191 |
 | 3 | Reserved | - | - | Writes rejected |
 
-CONTROL and PLAN discard upper payload bits. Kp is fixed at the former code 1,
-i.e. 0.25 steps/tick per encoder count (250 steps/s at 1 kHz); all four CONTROL
-bits are reserved and ignored. The PLAN acceleration field still selects one of
-eight profiles; the velocity field is reserved because `vmax` is fixed at 8191
-(3.9995 steps/tick). Configure CONTROL and PLAN before writing TARGET. A valid
+CONTROL was removed: addr 1 is reserved and rejected. Kp was fixed at the former code 1,
+i.e. 0.25 steps/tick per encoder count (250 steps/s at 1 kHz). The PLAN velocity field was removed
+because `vmax` is fixed at 8191 (3.9995 steps/tick); only payload bits [2:0] (accel code) are stored.
+Upper payload bits are ignored. Configure PLAN before writing TARGET. A valid
 TARGET commit arms a move, even if its value matches the previous target.
 Short and overlong frames are rejected; an empty selection is a no-op. Busy at any time during a transaction
 rejects its write, even if busy clears before CS rises. Reads still return status

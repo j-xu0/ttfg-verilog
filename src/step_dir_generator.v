@@ -87,6 +87,8 @@ module step_dir_generator #(
     localparam integer ENABLE_MAX = ENABLE_SETUP_CYCLES-1;
     localparam integer SETUP_MAX = DIR_MAX > ENABLE_MAX ? DIR_MAX : ENABLE_MAX;
     localparam integer SETUP_BITS = SETUP_MAX > 0 ? $clog2(SETUP_MAX+1) : 1;
+    // Dead at default params (MAX_COMMAND=8192 >= max |cmd|): kept so generic
+    // test configs still clamp. Locks vmax at the P-stage ceiling; do not retune.
     wire command_limited = velocity_command[13] ?
         $signed(velocity_command) < -$signed(MAX_COMMAND) :
         $signed(velocity_command) > $signed(MAX_COMMAND);

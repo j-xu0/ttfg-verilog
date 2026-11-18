@@ -102,16 +102,15 @@ async def rtl_register_and_encoder_integration(dut):
     """Check internal connections; excluded from flattened gate-level tests."""
     await initialize(dut)
     spi = dut.user_project.spi
-    for command, expected in ((0x9000, (4096, 0, 0)),
-                              (0xBFFA, (4096, 10, 0)),
-                              (0xDFD5, (4096, 10, 21))):
+    for command, expected in ((0x9000, (4096, 0)),
+                              (0xBFFA, (4096, 0)),
+                              (0xDFD5, (4096, 5))):
         await spi_frame(dut, command)
-        assert (int(spi.target.value), int(spi.control.value),
+        assert (int(spi.target.value),
                 int(spi.plan.value)) == expected
     await spi_frame(dut, 0xFFFF, count=7)
     assert int(spi.target.value) == 4096
-    assert int(spi.control.value) == 10
-    assert int(spi.plan.value) == 21
+    assert int(spi.plan.value) == 5
     for phase in (1, 3, 2, 0):
         set_input(dut, 3, phase >> 1)
         set_input(dut, 4, phase & 1)
@@ -179,7 +178,7 @@ async def closed_loop_moves_and_disturbance(dut):
     await initialize(dut)
     motor = MotorModel(dut)
     cocotb.start_soon(motor.run())
-    await spi_frame(dut, 0xA000)  # Kp=1/8
+    await spi_frame(dut, 0xA000)  # addr 1 reserved (ex-CONTROL), rejected, no effect
     await spi_frame(dut, 0xC03F)  # 10000 steps/s, ~100000 steps/s^2
     await spi_frame(dut, 0x8004)  # configure target while disabled
     await Timer(100, unit="us")
@@ -314,7 +313,7 @@ async def full_speed_and_default_limits(dut):
 async def serial_reference_sampling(dut):
     """P feedback snapshots the completed reference before the planner reuses it."""
     await initialize(dut)
-    await spi_frame(dut, 0xA03F)  # CONTROL: gain field now reserved (fixed Kp)
+    await spi_frame(dut, 0xA03F)  # addr 1 reserved (ex-CONTROL), rejected, no effect
     await spi_frame(dut, 0xC03F)
     await spi_frame(dut, 0x8004)
     set_input(dut, 5, 1)
@@ -416,7 +415,7 @@ async def shared_engine_abort_phases(dut):
 async def spi_init_short_move(dut):
     """Directed waveform: SPI setup writes, then one tiny accel/decel move.
 
-    CONTROL and PLAN are written while motion is disabled, then TARGET queues
+    PLAN is written while motion is disabled, then TARGET queues
     a 64-step move. Enabling starts it. Sixty-four steps is far below the
     profile's accel+decel distance, so the planner never reaches the velocity
     limit and there is no cruise phase: the STEP spacing falls then rises.
@@ -425,7 +424,7 @@ async def spi_init_short_move(dut):
     motor = MotorModel(dut)
     cocotb.start_soon(motor.run())
 
-    await spi_frame(dut, 0xA004)  # CONTROL: Kp = 1/4 (Ki bits reserved)
+    await spi_frame(dut, 0xA004)  # addr 1 reserved (ex-CONTROL), rejected, no effect
     await spi_frame(dut, 0xC03F)  # PLAN: 10000 steps/s, ~100000 steps/s^2
     await spi_frame(dut, 0x8040)  # TARGET: +64 steps, queued while disabled
     await Timer(100, unit="us")

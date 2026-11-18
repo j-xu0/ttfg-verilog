@@ -76,12 +76,12 @@ These cost real time; they are properties of this code, not history.
   legal Verilog and shifts a bit position. Add an elaboration-time assert or
   run a lint pass if you touch operand lists.
 * **Rotating-register taps must read bit 0** of the rotating field.
-* **`work` is a latch in the reference `pi_controller.v`, and must stay one.**
+* **Sampled inputs latch at the acceptance edge.**
   The oracle injects a mid-calculation `tick` and a changed `start_position`, so
   the measured sample has to be latched at the acceptance edge. Replacing it
   with the live `position` input breaks the disturbance contract.
-* **`src/plan_lut.vh` is generated** by `scripts/generate_plan_lut.py`; its
-  stopping table serves only the standalone reference planners.
+* **`src/plan_lut.vh` is generated** by `scripts/generate_plan_lut.py`; it holds
+  the 8-entry Q11 accel table.
 * The step generator is parameter-driven (`MAX_STEP_HZ 4000` → `MAX_COMMAND
   8192`, `PHASE_BITS 25` with the split-phase scheme). Its `command_limited`
   output is provably dead at the default parameters, worth ~40 um².
@@ -116,9 +116,8 @@ These cost real time; they are properties of this code, not history.
 
 ## Verification
 
-The retained standalone suites plus two shared-controller configurations give
-26 module cases. Shared tests use independent trajectory and PI arithmetic
-models across all 64 profiles, both directions, full position endpoints, all 16
+The shared-controller suite plus subsystem suites give module coverage. Shared tests use independent trajectory and fixed-Kp P
+models across all 8 accel profiles, both directions, full position endpoints, all 16
 gain pairs, feedback disturbances and ignored ticks. A cancellation sweep tests
 one-clock clear/controller-disable pulses at every offset 0 through 95 during
 PI work, with both an active planner and a completed trajectory, in both

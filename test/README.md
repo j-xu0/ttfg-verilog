@@ -6,22 +6,18 @@ Install Icarus Verilog and make, then run from the repository root:
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r test/requirements.txt
-python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_planner.py test/test_pi.py test/test_step_dir.py test/test_shared_controller.py -q
+python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_step_dir.py test/test_shared_controller.py -q
 make -C test -B
 ```
 
-The pytest runners compile each standalone module and run cocotb assertions.
+The pytest runners compile each module and run cocotb assertions.
 Each suite contains many directed cases:
 
-- Timebase and planner: standalone motion-building-block tests described in
-  [the motion-planning contract](../docs/motion-planning.md), including Q8/Q16
-  equivalence and mirror-rule trapezoid/triangle coverage. Generated ROM
+- Timebase: divider contract across divisors including 10000x default. Generated ROM
   reproducibility is checked alongside the shared controller tests.
-- Shared controller: both captured/stable configurations, all acceleration profiles,
+- Shared controller: both captured/stable configurations, all 8 acceleration profiles,
   sampled input isolation, fixed-Kp feedback without feedforward, reserved gain
   codes, cancellation and completion within 2,000 clocks.
-- PI: all gains, signed endpoints, rounding, saturation/anti-windup, feedforward,
-  clear/disable/reset, and seeded randomized arithmetic.
 - Pulse generator: signed/fractional rate counts, rate cap, high/low widths,
   DIR setup/hold, enable setup, reversals, zero rate, and safety aborts. An
   independent unreduced phase model checks every cycle across default, coprime,
