@@ -40,11 +40,22 @@ module stepper_spi (
     reg [1:0] input_valid;
     reg cs_armed;
     reg active, frame_busy, frame_write;
+    reg frame_at_target;
+    reg [1:0] frame_fault;
     reg event_during_frame;
     reg [4:0] bit_count;
-    reg [15:0] rx_shift, tx_shift;
+    reg [15:0] rx_shift;
 
-    assign miso = active && !cs_sync ? tx_shift[15] : 1'b0;
+    wire event_now = fault_event || motion_event;
+    // The snapshot is four bits, not a 16-bit shift image: the transmitted bit
+    // is selected by frame position instead, which replaces the whole transmit
+    // shift register with a decoder. bit_count is the index of the bit the host
+    // samples next, so index i carries status bit 15-i.
+    wire status_bit = bit_count == 5'd1 ? frame_busy :
+                      bit_count == 5'd2 ? frame_at_target :
+                      bit_count == 5'd14 ? frame_fault[1] :
+                      bit_count == 5'd15 ? frame_fault[0] : 1'b0;
+    assign miso = active && !cs_sync ? status_bit : 1'b0;
 
     // Hold motion starts from synchronized CS assertion until CS releases.
     // A frame is treated as a write until its first bit proves otherwise, so
@@ -74,11 +85,12 @@ module stepper_spi (
             cs_armed <= 1'b0;
             active <= 1'b0;
             frame_busy <= 1'b0;
+            frame_at_target <= 1'b0;
+            frame_fault <= 2'b00;
             frame_write <= 1'b1;
             event_during_frame <= 1'b0;
             int_pending <= 1'b0;
             bit_count <= 5'd0;
-            tx_shift <= 16'd0;
             target <= 13'sd0;
             plan <= 3'd0;
             write_pulse <= 1'b0;
@@ -107,20 +119,21 @@ module stepper_spi (
             // A fault or a completed move inside a read frame makes that
             // frame stale, so its read must acknowledge nothing and the host
             // must poll again.
-            if (active && (fault_event || motion_event))
+            if (active && event_now)
                 event_during_frame <= 1'b1;
             if (cs_armed && cs_last && !cs_sync) begin
                 active <= 1'b1;
                 frame_busy <= busy;
+                frame_at_target <= at_target;
+                frame_fault <= fault_code;
                 frame_write <= 1'b1;
                 bit_count <= 5'd0;
-                event_during_frame <= fault_event || motion_event;
-                tx_shift <= {1'b0, busy, at_target, 11'd0, fault_code};
+                event_during_frame <= event_now;
             end else if (!cs_last && cs_sync) begin
                 active <= 1'b0;
                 if (active && bit_count == 5'd16) begin
                     if (!rx_shift[15]) begin
-                        if (!event_during_frame && !fault_event && !motion_event) begin
+                        if (!event_during_frame && !event_now) begin
                             fault_clear_pulse <= 1'b1;
                             int_pending <= 1'b0;
                         end
@@ -160,14 +173,12 @@ module stepper_spi (
                     if (bit_count < 17)
                         bit_count <= bit_count + 1'b1;
                 end
-                if (sclk_last && !sclk_sync)
-                    tx_shift <= {tx_shift[14:0], 1'b0};
             end
 
             // Events always raise the interrupt, even on the frame that is
             // acknowledging an older one; the host polls again when INT stays
             // high.
-            if (fault_event || motion_event)
+            if (event_now)
                 int_pending <= 1'b1;
         end
     end

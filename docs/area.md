@@ -4,7 +4,7 @@ The allocation is 1x1: core **51,966.970 um²**. The last measured tip
 (`exp/p-only-fixed-kp`) fits it. CI run
 [`44132561693`](https://github.com/j-xu0/ttfg-verilog/actions/runs/44132561693)
 on commit `2ed4e39` (this measurement predates the SPI status and interrupt
-change, which is expected to be area-neutral but is not yet re-measured):
+change; see [the status-port cost](#the-status-port-cost) below):
 
 | Metric | Value |
 | --- | ---: |
@@ -30,6 +30,7 @@ numeric consequences.
 | Q11 serial/LUT arithmetic + dedicated single-cycle P stage | 42,718.6 | −26.6 % |
 | Fixed `vmax = 8191` | 40,231.4 | −5.9 % |
 | P-only fixed Kp (tip) | 36,302.0 | −9.8 % |
+| SPI status word + INT pin, transmit register removed, accel operand sized | 38,400.6 | −2.4 % vs its own parent (below) |
 
 The q13 CI factor is `total/local = 1.18694`; the 80 % local line is 35,026 um².
 Only same-flow deltas are meaningful. Two earlier 1x1 attempts are informative:
@@ -38,6 +39,44 @@ at 334.765 % utilisation with no `PL_TARGET_DENSITY_PCT` value able to help; a
 diagnostic 3x2 allocation passed, but 2x2 estimates 75.5 % utilisation, so no
 smaller tile worked — the design had to shrink instead. The spec-preserving
 P-only run reached 97.5 % utilisation and failed detailed placement (`DPL-0036`).
+
+## The status-port cost
+
+The SPI status word and INT pin (`8ead1ac`) landed **on the cliff, not next to
+it**. Two CI `gds` runs, one commit apart, with the same flow and the same
+Liberty:
+
+| Metric | parent `4264a78` | `8ead1ac` (+ status/INT) |
+| --- | ---: | ---: |
+| Post-synthesis cells (seq) | 39,024.07 (19,921.44) | 39,693.61 (20,149.74) |
+| Post-place cells | 43,048.79 | 43,919.49 (+2.02 %) |
+| GPL auto target density | 0.8600 -> 0.86064 | 0.8800 -> 0.88911 |
+| DRT iteration 0 violations | **1,223** | **5,544** |
+| DRT outcome | 0 in 10 iterations | never converged, killed at the 6 h cap |
+| `gds` job | pass, 15m48s | cancelled, 6h00m |
+
+Runs `44232341277` (pass) and `44240273510` (timeout). Nothing marginal failed a
+rule: +2 % of placed area crossed the density at which TritonRoute stops
+converging, and it bounced between 3k and 20k violations for six hours. The
+parent's own 1,223 starting violations are the warning sign — the design was
+already at the edge, so a small feature is not free. Treat any change that adds
+more than ~0.5 % of placed area as a routing risk and re-harden.
+
+Two exact rewrites paid for the feature with room to spare (local mapped top,
+same flow, cell-for-cell):
+
+| Change | Local area | Note |
+| --- | ---: | --- |
+| 16-bit MISO shift register -> 4-bit snapshot + position decoder | −873.7 | −13 flops (74.64 um² each); MISO is now decode-combinational, still stable >=4 clocks before the host's rising-edge sample |
+| Accel operand sized to the table (`11` -> `8` bits) | −164.7 | max entry is 205; the width is derived in `generate_plan_lut.py` |
+| Total vs `8ead1ac` | **−1,038.4** | seq 20,149.7 -> 19,179.5, cells 1,429 -> 1,397 |
+
+That is 928.6 um² (-2.36 %) *below the branch that routed*, so the projected CI
+placed area is ~42.0 k and the GPL density returns below 0.86. Sequential area
+matches CI exactly in every measurement, so the flop part of the delta carries
+over one-for-one; the combinational part does not (ABC moved the same 110 um²
+local delta by 441 um² in CI), which is why the margin matters more than the
+local total.
 
 ## Do not retry
 
@@ -68,6 +107,13 @@ Measured, not guessed. Numbers are local mapped area unless noted.
 * **`PL_TARGET_DENSITY_PCT` as a DPL fix.** Nothing at ~97 % utilisation.
 * **Follow-ups not taken** (all ≈wash): fixed acceleration 35,773, cheap 14-bit
   clamp 35,817, halving `vmax` without narrowing widths 36,025.
+* **Deciding the P clamp on the clamped error instead of the shifted sum.**
+  Provably equivalent (`over` is `clamped >= floor(vmax/512)+1`) and nine bits
+  instead of sixteen, but measured **+29 um²**: ABC already maps the 16-bit
+  compare against the constant ceiling cheaply. Watch the width if you try it —
+  `floor(vmax/512)+1` needs six signed bits at `vmax = 8191`, and a five-bit
+  version silently wraps to −16, which is why the first two measurements of this
+  idea looked like an 800 um² win.
 
 ## Measurement discipline
 

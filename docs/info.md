@@ -112,6 +112,10 @@ Because motion is held while CS is low, do not park CS asserted between
 frames. Keep each SCLK half-period and the CS setup/hold/idle intervals at least four
 system clocks (400 ns at 10 MHz). Keep MOSI stable at least two clocks before
 rising SCLK and through falling SCLK. At 500 kHz, the SCLK half-period is 1 us.
+MISO is selected from the captured status by frame position, so a bit settles a
+couple of clocks after the rising edge that advances the frame; the four-clock
+half-period is what keeps it stable well before the host's next rising-edge
+sample. Do not shorten it.
 After reset, hold CS high for at least four clocks before selecting the slave.
 A frame held selected through reset is ignored until CS returns high and a new
 transaction begins. Hold SCLK low outside transactions.

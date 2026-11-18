@@ -18,11 +18,16 @@ missed steps and disturbances, and report busy/at-target/fault status over SPI,
 with one interrupt output for repolling.
 
 **The 1x1 tapeout build hardened and passed precheck** (CI run
-`44132561693`: 0 DRT violations, minimum feasible density 0.8300) before the SPI
-status/interrupt change; that change is expected to be area-neutral and needs a
-fresh CI run. Post-layout
-timing signoff, gate-level harness X handling (`2fa46ad` stops the X at source in
-the planner bit index; the bench still needs a guard), and hardware tuning remain.
+`44132561693`: 0 DRT violations, minimum feasible density 0.8300). The SPI
+status/interrupt change that followed missed that margin on its own — it added
+2 % of placed area and pushed TritonRoute past the density where it converges —
+so it now also removes the 16-bit MISO shift register (a 4-bit snapshot is
+decoded by frame position) and sizes the accel operand to its table. That lands
+928.6 um² *below* the last routed branch and needs a fresh CI run; the numbers
+and the failure signature are in [the area budget](docs/area.md#the-status-port-cost).
+Post-layout timing signoff, gate-level harness X handling (`2fa46ad` stops the X
+at source in the planner bit index; the bench still needs a guard), and hardware
+tuning remain.
 
 - [Interface, pinout, and timing](docs/info.md)
 - [Implementation steps and unresolved proposal details](docs/implementation.md)

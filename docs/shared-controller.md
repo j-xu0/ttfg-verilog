@@ -82,7 +82,9 @@ These cost real time; they are properties of this code, not history.
   the measured sample has to be latched at the acceptance edge. Replacing it
   with the live `position` input breaks the disturbance contract.
 * **`src/plan_lut.vh` is generated** by `scripts/generate_plan_lut.py`; it holds
-  the 8-entry Q11 accel table.
+  the 8-entry Q11 accel table. Its width is derived from the largest entry (8
+  bits today, not the 11 bits of the ALU operand): the engine selects one accel
+  bit at a time, so every spare output bit costs a stage of the bit-select mux.
 * The step generator is parameter-driven (`MAX_STEP_HZ 4000` → `MAX_COMMAND
   8192`, `PHASE_BITS 25` with the split-phase scheme). Its `command_limited`
   output is provably dead at the default parameters, worth ~40 um².
