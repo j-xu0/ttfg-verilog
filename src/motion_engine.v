@@ -71,7 +71,7 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
     // Single source of truth; all three uses below are the same ceiling.
     localparam [12:0] VMAX = 13'd8191;
     assign vmax = VMAX;
-    wire [10:0] accel = profile_acceleration(profile);
+    wire [ACCEL_BITS-1:0] accel = profile_acceleration(profile);
     wire signed [23:0] goal_q11 = {goal, 11'b0};
     // The full position register rotates during every position pass; DIST and
     // POSITION replace it with the remaining distance and restore it again.
@@ -86,7 +86,7 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
         goal_bit,
         bit_index < 24 ? position_bit : 1'b0,
         position_signed_bit,
-        bit_index < 11 ? accel[bit_index] : 1'b0,
+        bit_index < ACCEL_BITS ? accel[bit_index] : 1'b0,
         bit_index < 13 ? speed[0] : 1'b0,
         1'b0};
 

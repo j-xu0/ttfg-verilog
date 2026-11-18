@@ -31,10 +31,13 @@ These are implementation choices where the proposals differ or omit details.
 Remaining hardware decisions are the actual driver IC/electrical timing,
 encoder-to-step conversion if not 1:1, homing, physical gain tuning, and whether
 idle holding torque is required. PWM is replaced by signed step-rate control
-for the detailed proposal's external STEP/DIR architecture. Persistent rejection
-readback, an interrupt, and hardware homing are not implemented; output 7 remains
-zero. Faults clear on a complete explicit SPI read; see `fault-recovery.md`. Busy writes are rejected internally and must
-be retried by the host; status readback is always available.
+for the detailed proposal's external STEP/DIR architecture. Status is not driven
+on dedicated pins: busy, at-target and the fault codes are returned by every SPI
+frame, and `uo_out[3]` is an interrupt that stays asserted until a read. Outputs
+4, 5 and 7 remain zero. Hardware homing is not implemented. Faults and the
+interrupt clear on a complete SPI read; see `fault-recovery.md`. A frame whose
+returned status word reports BUSY drops its write and must be retried by the
+host, which already has that bit; status readback is always available.
 
 Generic full-design synthesis passes with no structural check failures. The
 integrated serial planner uses bounded shift/add setup and stopping recurrences;

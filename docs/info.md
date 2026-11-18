@@ -14,7 +14,9 @@ are assigned. Unused dedicated outputs drive zero. All bidirectional pins are
 unused inputs (`uio_oe=0`, `uio_out=0`); there are no internal tri-state nets.
 MISO is a dedicated output, so it drives zero while idle rather than becoming
 high impedance. Do not wire it directly onto a shared MISO bus without an
-external buffer or separate selection arrangement.
+external buffer or separate selection arrangement. Busy, at-target and fault
+are not driven on dedicated pins; every SPI frame returns them as a status word
+(see below), and `uo_out[3]` tells the host when to poll.
 
 ### Pins
 
@@ -30,9 +32,9 @@ external buffer or separate selection arrangement.
 | `uo_out[0]` | STEP, rising-edge step command |
 | `uo_out[1]` | DIR, high for positive motion |
 | `uo_out[2]` | ENABLE, logical active high while active |
-| `uo_out[3]` | Busy, motion or settling in progress |
-| `uo_out[4]` | At target, exact feedback for four control samples |
-| `uo_out[5]` | Sticky encoder transition or signed-range fault |
+| `uo_out[3]` | Interrupt, active high, held until a status read |
+| `uo_out[4]` | Unused, zero |
+| `uo_out[5]` | Unused, zero |
 | `uo_out[6]` | SPI MISO |
 | `uo_out[7]` | Unused, zero |
 | `uio[7:0]` | Unused, input mode |
@@ -40,9 +42,11 @@ external buffer or separate selection arrangement.
 | `rst_n` | Active-low reset; hold across a clock edge |
 
 MISO on output 6 is an implementation choice: the detailed proposal assigns
-outputs 0-5 but omits MISO. Output 7 remains available for a future interrupt
-once its behavior is defined. `ena=0` suppresses dedicated outputs; normal
-operation assumes the project is selected and `ena=1`.
+outputs 0-5 but omits MISO. Outputs 3-5 replace the proposal's busy, at-target
+and fault pins with a single interrupt; status itself is only readable over
+SPI, so a host needs six wires (`SCLK`, `CS`, `MOSI`, `MISO`, `INT`, ground).
+`ena=0` suppresses dedicated outputs; normal operation assumes the project is
+selected and `ena=1`.
 
 ### SPI registers
 
@@ -56,30 +60,62 @@ atomically after synchronized CS deassertion, never during a partial transfer.
 | Address | Name | Width | Reset | Interpretation |
 | --- | --- | --- | --- | --- |
 | 0 | TARGET | 13 | 0 | Signed two's-complement position, -4096 to 4095 |
-| 1 | Reserved | - | - | Writes rejected (was CONTROL: fixed-Kp/Ki, removed for 1x1) |
+| 1 | Reserved | - | - | Silently ignored (was CONTROL: fixed-Kp/Ki, removed for 1x1) |
 | 2 | PLAN | 3 | 0 | Acceleration code 0-7 only; velocity fixed at 8191 |
 | 3 | ZERO_POSITION | - | - | Payload must be zero; motion enable must be low; zeros position and TARGET |
 
-CONTROL was removed: addr 1 is reserved and rejected. Kp was fixed at the former code 1,
+CONTROL was removed: addr 1 is reserved and silently ignored. Kp was fixed at the former code 1,
 i.e. 0.25 steps/tick per encoder count (250 steps/s at 1 kHz). The PLAN velocity field was removed
 because `vmax` is fixed at 8191 (3.9995 steps/tick); only payload bits [2:0] (accel code) are stored.
 Upper payload bits are ignored. Configure PLAN before writing TARGET. A valid
 TARGET commit arms a move, even if its value matches the previous target.
-Short and overlong frames are rejected; an empty selection is a no-op. Busy at any time during a transaction
-rejects its write, even if busy clears before CS rises. Reads still return status
-while busy.
+Short, overlong, reserved-address and illegal frames are silent no-ops; an
+empty selection is a no-op.
 
-Every frame returns a status snapshot captured at synchronized CS assertion:
-`{1'b0, busy, at_target, fault, 10'b0, range_fault, encoder_fault}`. The first four returned bits are therefore
-`0, busy, at_target, fault`. A 16-bit command with its first bit zero reads this
-status and acknowledges latched faults after the complete frame. Writes never acknowledge faults. This read-command behavior and bit ordering
-resolve details left unspecified in the proposal. Busy is `0x4000`, settled is
-`0x2000`, and fault is `0x1000`. Malformed/reserved writes produce an internal
-one-cycle rejection pulse; a persistent host-visible rejection code is pending.
+### Status and interrupt
 
-Keep each SCLK half-period and the CS setup/hold/idle intervals at least four
+Every frame returns a 16-bit status snapshot captured at synchronized CS
+assertion:
+
+| Bits | Meaning |
+| --- | --- |
+| 15 | Always zero |
+| 14 | `BUSY`: planning, feedback correction or settling in progress |
+| 13 | `AT_TARGET`: settled with exact feedback at the written target |
+| 12:2 | Zero |
+| 1 | `RANGE_FAULT`: signed-range wrap |
+| 0 | `ENC_FAULT`: invalid encoder transition |
+
+There is no separate summary fault bit: `FAULT` is
+`RANGE_FAULT | ENC_FAULT`, i.e. mask `0x0003`. Busy is `0x4000` and at-target is
+`0x2000`. A 16-bit command whose first bit is zero reads this word and, after
+the complete frame, acknowledges latched faults and the interrupt. Writes never
+acknowledge. Reads are allowed while busy.
+
+The returned `BUSY` bit is also the verdict on that same write. Motion starts
+are held for as long as a frame is in flight (until its first bit proves the
+frame is a read), so a queued command cannot begin during a frame. A write is
+accepted exactly when the word returned by its own frame has `BUSY` clear; a
+frame that returns `BUSY=1` drops its write without side effects and the host
+must retry. A write in flight when motion enable rises wins the race: it
+replaces the queued target instead of being rejected.
+
+`uo_out[3]` is an interrupt: it goes high when a move ends (completion or
+abort) or a fault latches, and stays high until a complete read acknowledges
+it. It is a level, not a pulse. An MCU that only reacts to edges must keep
+reading while the pin is still high, because an event that arrives during a
+read leaves the interrupt asserted and the read acknowledges nothing. Status
+bits are recovered by polling, so a missed edge never loses state; only the
+number of coalesced completions is lost.
+
+Because motion is held while CS is low, do not park CS asserted between
+frames. Keep each SCLK half-period and the CS setup/hold/idle intervals at least four
 system clocks (400 ns at 10 MHz). Keep MOSI stable at least two clocks before
 rising SCLK and through falling SCLK. At 500 kHz, the SCLK half-period is 1 us.
+MISO is selected from the captured status by frame position, so a bit settles a
+couple of clocks after the rising edge that advances the frame; the four-clock
+half-period is what keeps it stable well before the host's next rising-edge
+sample. Do not shorten it.
 After reset, hold CS high for at least four clocks before selecting the slave.
 A frame held selected through reset is ignored until CS returns high and a new
 transaction begins. Hold SCLK low outside transactions.
@@ -115,10 +151,13 @@ SKY130 pad limits; those numbers are not GF180 signoff limits. Maximum safe cloc
 and output rates must be established with the GF180 flow and the actual board
 and output loading. RTL tests alone do not prove them.
 
-All functional blocks now feed observable motion/status outputs. The current
-P-only fixed-Kp tip **hardens on the 1x1 tile and passes precheck** (CI run
-`44132561693`: 0 DRT violations, minimum feasible density 0.8300). The measured
-cell area is 41,578 um² before routability inflation, 42,913 um² final, against
+All functional blocks now feed observable motion/status outputs. Status is read
+over SPI; `uo_out[7:3]` no longer carries busy/at-target/fault, and the added
+interrupt plus launch gate are expected to be area-neutral (one dropped strobe
+register against one added latch), but CI has not yet re-measured them. The last
+hardened tip **passes precheck** (CI run
+`44132561693`: 0 DRT violations, minimum feasible density 0.8300) and measured a
+cell area of 41,578 um² before routability inflation, 42,913 um² final, against
 the 51,967 um² core. See [the area budget](area.md) for the restriction set,
 ledger and rejected alternatives.
 
@@ -127,7 +166,7 @@ ledger and rejected alternatives.
 Run the commands in `test/README.md`. Module tests cover arithmetic, trajectories,
 pulse timing, command framing, and feedback decoding. Port-level integration tests
 exercise a simulated motor with missed steps, reverse commands, shaft disturbance,
-settling, busy-write rejection, abort/reset, and both signed-range boundaries. The
+settling, busy write drops, abort/reset, and both signed-range boundaries. The
 register-wiring test uses RTL hierarchy and is skipped for flattened gate-level
 simulation; the port-level tests remain enabled.
 

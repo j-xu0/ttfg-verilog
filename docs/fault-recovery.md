@@ -1,14 +1,23 @@
 # Fault reporting and host recovery
 
-Every SPI frame returns a frame-start status snapshot. Bits 14/13/12 remain
-busy/at-target/any-fault. Bits 1/0 identify signed-range overflow/invalid encoder
-transition respectively; both can be set. Other bits are zero.
+Every SPI frame returns a frame-start status snapshot. Bit 14 is busy and bit 13
+is at-target. Bits 1/0 identify signed-range overflow/invalid encoder transition
+respectively; both can be set. There is no separate summary fault bit: any fault
+is `bits[1:0] != 0`. Other bits are zero.
 
-Any complete 16-bit explicit read (MOSI bit 15 = 0, other bits ignored) returns
-status then acknowledges faults when CS rises. Reads are allowed while busy.
-Writes, partial/overlong frames, and reset-aborted frames never acknowledge.
-If any new fault event occurs during the read, neither fault is acknowledged;
-the host must read again. New events take priority over acknowledgement.
+`uo_out[3]` is the interrupt. It asserts when the fault code latches and when a
+move ends (completion or abort), and stays asserted until acknowledged. It is a
+level, not a pulse, and it is not a per-event queue: several events before one
+read collapse into one assertion.
+
+Any complete 16-bit read (MOSI bit 15 = 0, other bits ignored) returns status
+then acknowledges the faults and the interrupt when CS rises. Reads are allowed
+while busy. A read is destructive for all latched state, so inspect the whole
+word rather than only the bit that caused the poll. Writes, partial/overlong
+frames, and reset-aborted frames never acknowledge. If any new event (fault
+latch or move completion) occurs during the read, nothing is acknowledged, the
+interrupt stays high, and the host must read again. New events take priority
+over acknowledgement.
 
 Faults immediately inhibit motor outputs and abort the old target. Acknowledging
 preserves the encoder count and does not resume that target. A fresh TARGET is
@@ -17,11 +26,14 @@ after a range fault: acknowledgement is permission for host-directed recovery,
 not evidence that coordinates are correct. Further faults still stop motion.
 
 Write **0xE000** to establish position zero. This command is accepted only with
-motion-enable input ui_in[5] low and no busy state during the frame. Nonzero
-payloads are rejected. Keep the shaft stationary through this command. It zeros
-the encoder and TARGET, cancels pending/armed/settled motion state, and disables
-controller work. It does not acknowledge faults or change PLAN. A fresh TARGET
-is required after zeroing; asserting enable alone cannot start movement.
+motion-enable input ui_in[5] low and a status word that does not report BUSY.
+Nonzero payloads are ignored. Keep the shaft stationary through this command. It
+zeros the encoder and TARGET, cancels pending/armed/settled motion state, and
+disables controller work. It does not acknowledge faults or change PLAN. A fresh
+TARGET is required after zeroing; asserting enable alone cannot start movement.
+Because position itself is not readable over SPI, the only confirmation that
+zeroing took effect is that the command was accepted and subsequent at-target
+reads agree with the host's own bookkeeping.
 
 The MCU can acknowledge a fault, perform homing using its own independent
 reference, disable motion, zero position, then issue a fresh target. It must

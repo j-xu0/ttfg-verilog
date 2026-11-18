@@ -29,9 +29,10 @@ TEMPLATES = {
         ("Frame state", ["sclk_sync", "cs_sync", "mosi_sync", "cs_armed",
                           "active", "bit_count"]),
         ("Shift registers", ["rx_shift", "tx_shift"]),
-        ("Committed registers", ["target", "control", "plan"]),
-        ("Strobes", ["write_pulse", "target_write_pulse", "reject_pulse"]),
-        ("Status captured at CS fall", ["busy", "at_target", "fault"]),
+        ("Committed registers", ["target", "plan"]),
+        ("Strobes", ["write_pulse", "target_write_pulse", "int_pending"]),
+        ("Status captured at CS fall", ["busy", "at_target", "fault_code",
+                                        "frame_holds_motion"]),
     ]),
     "quadrature_decoder": ("Quadrature encoder", [
         (None, ["clk", "rst_n", "a", "b"]),
