@@ -8,19 +8,24 @@
 // reset before starting a frame; a frame already active at reset is ignored.
 // Transactions are exactly 16 bits: {write, address[1:0], payload[12:0]}.
 // Address 0 = signed target, 1 = reserved, 2 = plan[2:0] (acceleration
-// code only; velocity is fixed). Address 1 and 3 are reserved.
+// code only; velocity is fixed). Address 1 is reserved.
+// Write 0xE000 zeros position/target only while motion is disabled.
 // Writes commit only after CS rises. No partial frame can write.
 // Every frame returns a status snapshot captured when synchronized CS falls:
-// {1'b0, busy, at_target, fault, 12'b0}. Read commands (write=0) ignore
-// address/payload and never modify registers. MISO is zero while idle.
+// {1'b0, busy, at_target, fault, 10'b0, range_fault, encoder_fault}.
+// Complete reads (write=0, address/payload ignored) acknowledge faults unless
+// a new event arrived during the frame. Writes never acknowledge faults. MISO is zero while idle.
 module stepper_spi (
     input wire clk, rst_n,
     input wire sclk, cs_n, mosi,
     input wire busy, fault, at_target,
+    input wire [1:0] fault_code,
+    input wire fault_event, motion_disabled,
     output wire miso,
     output reg signed [12:0] target,
     output reg [2:0] plan,
     output reg write_pulse, reject_pulse,
+    output reg fault_clear_pulse, zero_position_pulse,
     output reg target_write_pulse
 );
     (* async_reg = "true" *) reg sclk_meta, sclk_sync;
@@ -30,6 +35,7 @@ module stepper_spi (
     reg [1:0] input_valid;
     reg cs_armed;
     reg active, busy_seen;
+    reg fault_during_frame;
     reg [4:0] bit_count;
     reg [15:0] rx_shift, tx_shift;
 
@@ -56,6 +62,7 @@ module stepper_spi (
             input_valid <= 2'b00;
             cs_armed <= 1'b0;
             active <= 1'b0;
+            fault_during_frame <= 1'b0;
             busy_seen <= 1'b0;
             bit_count <= 5'd0;
             tx_shift <= 16'd0;
@@ -63,6 +70,8 @@ module stepper_spi (
             plan <= 3'd0;
             write_pulse <= 1'b0;
             target_write_pulse <= 1'b0;
+            fault_clear_pulse <= 1'b0;
+            zero_position_pulse <= 1'b0;
             reject_pulse <= 1'b0;
         end else begin
             input_valid <= {input_valid[0], 1'b1};
@@ -80,17 +89,26 @@ module stepper_spi (
             mosi_sync <= mosi_meta;
             write_pulse <= 1'b0;
             target_write_pulse <= 1'b0;
+            fault_clear_pulse <= 1'b0;
+            zero_position_pulse <= 1'b0;
             reject_pulse <= 1'b0;
 
+            if (active && fault_event) fault_during_frame <= 1'b1;
             if (cs_armed && cs_last && !cs_sync) begin
                 active <= 1'b1;
                 busy_seen <= busy;
                 bit_count <= 5'd0;
-                tx_shift <= {1'b0, busy, at_target, fault, 12'd0};
+                fault_during_frame <= fault_event;
+                tx_shift <= {1'b0, busy, at_target, fault, 10'd0, fault_code};
             end else if (!cs_last && cs_sync) begin
                 active <= 1'b0;
                 if (active && bit_count != 0) begin
-                    if (bit_count != 16 || busy_seen || busy) begin
+                    if (bit_count != 16) begin
+                        reject_pulse <= 1'b1;
+                    end else if (!rx_shift[15]) begin
+                        if (!fault_during_frame && !fault_event)
+                            fault_clear_pulse <= 1'b1;
+                    end else if (busy_seen || busy) begin
                         reject_pulse <= 1'b1;
                     end else if (rx_shift[15]) begin
                         case (rx_shift[14:13])
@@ -104,7 +122,13 @@ module stepper_spi (
                                 plan <= rx_shift[2:0];
                                 write_pulse <= 1'b1;
                             end
-                            default: reject_pulse <= 1'b1;
+                            2'd3: begin
+                                if (rx_shift[12:0] == 0 && motion_disabled) begin
+                                    zero_position_pulse <= 1'b1;
+                                    target <= 0;
+                                    write_pulse <= 1'b1;
+                                end else reject_pulse <= 1'b1;
+                            end
                         endcase
                     end
                 end

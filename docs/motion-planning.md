@@ -22,7 +22,7 @@ and settling. A stall without feedback leaves busy asserted until disable/reset.
 Motion enable assertion is synchronized. Raw low, `ena=0`, reset, or a sticky
 fault inhibits STEP/ENABLE immediately. Disable aborts, clears controller state,
 and discards the active command; re-enabling requires a new TARGET write. A target
-written while faulted cannot cause motion. Fault recovery requires reset.
+written while faulted cannot cause motion. Fault recovery uses a complete explicit SPI read; see `fault-recovery.md`.
 Hold reset across at least one rising clock edge because the planner and P
 controller reset synchronously. Motion-pin suppression is immediate and does not
 wait for engine state to clear.

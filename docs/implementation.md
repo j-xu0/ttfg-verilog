@@ -33,7 +33,7 @@ encoder-to-step conversion if not 1:1, homing, physical gain tuning, and whether
 idle holding torque is required. PWM is replaced by signed step-rate control
 for the detailed proposal's external STEP/DIR architecture. Persistent rejection
 readback, an interrupt, and hardware homing are not implemented; output 7 remains
-zero. Faults clear only with reset. Busy writes are rejected internally and must
+zero. Faults clear on a complete explicit SPI read; see `fault-recovery.md`. Busy writes are rejected internally and must
 be retried by the host; status readback is always available.
 
 Generic full-design synthesis passes with no structural check failures. The

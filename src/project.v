@@ -22,11 +22,15 @@ module tt_um_j_xu0_stepper (
   (* async_reg = "true" *) reg enable_meta, enable_sync;
   reg previous_sign;
   reg range_fault;
+  wire fault_clear_pulse, zero_position_pulse, encoder_event;
+  wire range_event = !zero_position_pulse &&
+      ((!previous_sign && position == -13'sd4096) ||
+       (previous_sign && position == 13'sd4095));
   reg command_pending, active, armed, settled;
   reg [1:0] settle_count;
   wire fault = encoder_fault || range_fault;
   // Raw low immediately inhibits pins; assertion still passes the synchronizer.
-  wire run_allowed = rst_n && ena && ui_in[5] && enable_sync && !fault;
+  wire run_allowed = rst_n && ena && ui_in[5] && enable_sync && !fault && !zero_position_pulse;
   wire busy = active || (command_pending && run_allowed);
   wire at_target = settled && !active && !command_pending && run_allowed
                    && position == target;
@@ -59,9 +63,9 @@ module tt_um_j_xu0_stepper (
       // endpoint identifies either signed wrap without a second 13-bit counter.
       // Refuse wrap in the absolute coordinate system instead of making a
       // nearly full-range correction. Reset establishes a new zero reference.
-      if ((!previous_sign && position == -13'sd4096) ||
-          (previous_sign && position == 13'sd4095))
-        range_fault <= 1;
+      if (fault_clear_pulse) range_fault <= 0;
+      if (range_event) range_fault <= 1;
+      if (zero_position_pulse) previous_sign <= 0;
       if (target_write_pulse)
         command_pending <= 1;
       if (!run_allowed) begin
@@ -71,7 +75,7 @@ module tt_um_j_xu0_stepper (
         settle_count <= 0;
         // An idle TARGET written while disabled can arm the next enable.
         // Aborted moves and faults never restart automatically.
-        if (active || armed || fault)
+        if (active || armed || fault || zero_position_pulse)
           command_pending <= 0;
       end else if (target_write_pulse) begin
         // A fresh host command wins over disturbance recovery. The register
@@ -108,13 +112,18 @@ module tt_um_j_xu0_stepper (
       .clk(clk), .rst_n(rst_n),
       .sclk(ui_in[0]), .cs_n(ui_in[1]), .mosi(ui_in[2]),
       .busy(busy), .fault(fault), .at_target(at_target),
+      .fault_code({range_fault, encoder_fault}),
+      .fault_event(encoder_event || range_event), .motion_disabled(!ui_in[5]),
+      .fault_clear_pulse(fault_clear_pulse), .zero_position_pulse(zero_position_pulse),
       .miso(miso), .target(target), .plan(plan),
       .write_pulse(write_pulse), .reject_pulse(reject_pulse),
       .target_write_pulse(target_write_pulse)
   );
   quadrature_decoder encoder (
       .clk(clk), .rst_n(rst_n), .a(ui_in[3]), .b(ui_in[4]),
-      .position(position), .fault(encoder_fault)
+      .position(position), .fault(encoder_fault),
+      .clear_fault(fault_clear_pulse), .zero_position(zero_position_pulse),
+      .fault_event(encoder_event)
   );
   control_timebase timebase (
       .clk(clk), .rst_n(rst_n), .enable(run_allowed), .control_ce(control_ce)

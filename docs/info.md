@@ -58,7 +58,7 @@ atomically after synchronized CS deassertion, never during a partial transfer.
 | 0 | TARGET | 13 | 0 | Signed two's-complement position, -4096 to 4095 |
 | 1 | Reserved | - | - | Writes rejected (was CONTROL: fixed-Kp/Ki, removed for 1x1) |
 | 2 | PLAN | 3 | 0 | Acceleration code 0-7 only; velocity fixed at 8191 |
-| 3 | Reserved | - | - | Writes rejected |
+| 3 | ZERO_POSITION | - | - | Payload must be zero; motion enable must be low; zeros position and TARGET |
 
 CONTROL was removed: addr 1 is reserved and rejected. Kp was fixed at the former code 1,
 i.e. 0.25 steps/tick per encoder count (250 steps/s at 1 kHz). The PLAN velocity field was removed
@@ -70,9 +70,9 @@ rejects its write, even if busy clears before CS rises. Reads still return statu
 while busy.
 
 Every frame returns a status snapshot captured at synchronized CS assertion:
-`{1'b0, busy, at_target, fault, 12'b0}`. The first four returned bits are therefore
+`{1'b0, busy, at_target, fault, 10'b0, range_fault, encoder_fault}`. The first four returned bits are therefore
 `0, busy, at_target, fault`. A 16-bit command with its first bit zero reads this
-status without modifying registers. This read-command behavior and bit ordering
+status and acknowledges latched faults after the complete frame. Writes never acknowledge faults. This read-command behavior and bit ordering
 resolve details left unspecified in the proposal. Busy is `0x4000`, settled is
 `0x2000`, and fault is `0x1000`. Malformed/reserved writes produce an internal
 one-cycle rejection pulse; a persistent host-visible rejection code is pending.
@@ -91,8 +91,8 @@ A and B pass through two-flop synchronizers. The sequence
 is a signed 13-bit x4 count. The decoder itself wraps modulo 8192, but the
 top level latches a range fault on either signed wrap and aborts motion. The
 controller requires one encoder count per motor step; other ratios require a
-scaling change. A simultaneous two-bit jump does not change position and latches fault until reset. The next valid edge can count
-again; the fault stays latched.
+scaling change. A simultaneous two-bit jump does not change position and latches fault until a complete explicit SPI read. The next valid edge can count
+again; the fault stays latched until acknowledged. See [fault recovery](fault-recovery.md) for codes, races, and the disabled-only `0xE000` position-zero command.
 
 Hold the encoder stationary through reset and at least four system-clock edges
 after release so the initial phase can be established without a false count.

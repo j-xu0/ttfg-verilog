@@ -12,6 +12,8 @@ module quadrature_decoder (
     input wire rst_n,
     input wire a,
     input wire b,
+    input wire clear_fault, zero_position,
+    output wire fault_event,
     output reg signed [12:0] position,
     output reg fault
 );
@@ -33,6 +35,8 @@ module quadrature_decoder (
                                    (position[bit_index-1] ^ decrement);
     end endgenerate
 
+    assign fault_event = startup_cycles == 2'd3 && (&changed) && !zero_position;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             ab_meta <= 2'b00;
@@ -44,9 +48,13 @@ module quadrature_decoder (
         end else begin
             ab_meta <= {a, b};
             ab_sync <= ab_meta;
+            if (clear_fault) fault <= 1'b0;
             // Establish the initial phase after the synchronizer settles so
             // reset release at any stationary AB value never adds a count.
-            if (startup_cycles != 2'd3) begin
+            if (zero_position) begin
+                position <= 0;
+                previous_ab <= ab_sync;
+            end else if (startup_cycles != 2'd3) begin
                 startup_cycles <= startup_cycles + 2'd1;
                 previous_ab <= ab_sync;
             end else begin
