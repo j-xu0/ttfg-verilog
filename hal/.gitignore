@@ -1,0 +1,6 @@
+# Build output
+/build/
+# clangd database, symlinked from build/ by CMakeLists.txt
+/compile_commands.json
+# clangd index cache
+/.cache/
