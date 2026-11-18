@@ -4,7 +4,7 @@
 Each generated ``<name>.gtkw`` opens the matching ``<name>.fst`` with a
 curated, module-specific signal set already inserted.  The signal lists are
 filtered against the actual FST, so parameter variants that omit internals
-(e.g. parallel PI) do not produce "signal not found" warnings.
+do not produce "signal not found" warnings.
 
 Usage:
     python3 scripts/gen_wave_saves.py
@@ -44,40 +44,6 @@ TEMPLATES = {
         (None, ["clk", "rst_n", "enable"]),
         ("Control-tick enable", ["count", "control_ce"]),
     ]),
-    "motion_planner": ("Motion planner (reference)", [
-        (None, ["clk", "rst_n", "enable", "start", "tick"]),
-        ("Inputs / outputs", ["start_position", "target_position",
-                               "reference_position", "reference_velocity"]),
-        ("Lifecycle", ["busy", "done", "preparing", "final_step"]),
-        ("Phase / speed", ["phase", "next_phase", "velocity_limit",
-                            "velocity_magnitude", "next_speed"]),
-        ("Distances / mirror rule", ["traveled", "turn_distance",
-                                      "total_distance", "remaining",
-                                      "remaining_after", "sped_up", "faster"]),
-        ("Serial workspace", ["stepped", "step_ext", "start_q", "span",
-                               "projected", "position_ext", "doubled",
-                               "advanced", "direction_negative",
-                               "start_negative"]),
-    ]),
-    "pi_controller": ("PI controller", [
-        (None, ["clk", "rst_n", "enable", "clear", "tick"]),
-        ("Inputs", ["reference_position", "measured_position",
-                     "feedforward_velocity", "max_velocity",
-                     "kp_select", "ki_select"]),
-        ("Outputs", ["velocity_command", "saturated", "integral",
-                      "calculating"]),
-        ("Parallel datapath", ["error", "proportional", "integral_delta",
-                                "command_sum", "integral_sum", "reference_wide",
-                                "measured_wide", "feedforward_wide",
-                                "integral_wide"]),
-        ("Serial sampled arithmetic", ["error_integer", "work", "error_ring",
-                                        "error_negative", "negative", "carry"]),
-        ("Serial engine", ["state", "bit_count", "sum", "value",
-                            "gain", "error_bit", "integral_bit", "ff_bit",
-                            "integral_phase"]),
-        ("Clamp / anti-windup", ["limit", "overflow", "clipped", "windup",
-                                  "comparison", "compare_clipped", "low_sign"]),
-    ]),
     "step_dir_generator": ("STEP / DIR generator", [
         ("Clock / abort gates", ["clk", "rst_n", "enable", "fault"]),
         ("Command / status", ["velocity_command", "rate_limited"]),
@@ -111,8 +77,6 @@ FILE_TOP = [
     ("spi", "stepper_spi"),
     ("encoder", "quadrature_decoder"),
     ("timebase", "control_timebase"),
-    ("planner", "motion_planner"),
-    ("pi", "pi_controller"),
     ("step_dir", "step_dir_generator"),
     ("shared_controller", "shared_motion_controller"),
 ]

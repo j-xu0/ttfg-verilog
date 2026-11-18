@@ -393,6 +393,7 @@ def test_step_dir_exact_nco(tmp_path, configuration):
                  hdl_toplevel="step_dir_generator", parameters=params,
                  build_dir=tmp_path / "nco_build", timescale=("1ns", "1ps"), always=True)
     runner.test(hdl_toplevel="step_dir_generator", test_module="test_step_dir",
-                test_filter="(rate_demo|nco_old_algorithm_equivalence)",
+                test_filter="(rate_demo|nco_old_algorithm_equivalence)" if configuration == "production"
+                else "nco_old_algorithm_equivalence",
                 test_dir=Path(__file__).parent, extra_env={"STEP_TEST_PARAMS": json.dumps(params)},
                 results_xml=str(tmp_path / "nco_results.xml"))

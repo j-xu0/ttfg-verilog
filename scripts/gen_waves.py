@@ -9,13 +9,12 @@ own pytest ``--basetemp`` directory; the resulting FSTs are copied to
 Usage:
     python3 scripts/gen_waves.py                 # blocks + chip-level e2e
     python3 scripts/gen_waves.py --no-e2e        # blocks only
-    python3 scripts/gen_waves.py --only spi pi   # selected suites
+    python3 scripts/gen_waves.py --only spi encoder   # selected suites
     python3 scripts/gen_waves.py --keep-build    # keep pytest build trees
 
-The full run takes roughly 7 minutes: the shared-controller suite alone runs a
-feedback cancellation sweep in two configurations (~2 minutes), and the
-chip-level integration run takes ~4 minutes.  The chip-level phase also reruns
-one directed testcase (`spi_init_short_move`) for a short, easy-to-read trace.
+The full run includes the shared-controller feedback cancellation sweep in two
+configurations and the chip-level integration suite. The chip-level phase also
+reruns `spi_init_short_move` for a short, easy-to-read trace.
 """
 
 from __future__ import annotations
@@ -25,6 +24,7 @@ import os
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,8 +35,6 @@ SUITES = {
     "spi": ["test/test_spi.py"],
     "encoder": ["test/test_encoder.py"],
     "timebase": ["test/test_timebase.py"],
-    "planner": ["test/test_planner.py"],
-    "pi": ["test/test_pi.py"],
     "step_dir": ["test/test_step_dir.py"],
     "shared_controller": ["test/test_shared_controller.py"],
 }
@@ -60,20 +58,6 @@ def label_for(name: str, item: str) -> str:
             return "timebase__7hz_1hz"
         if "1_1" in item:
             return "timebase__1hz_1hz"
-    if name == "planner":
-        if "8_16" in item:
-            return "planner__q8_parallel"
-        if "16_20_1" in item:
-            return "planner__q16_serial"
-        if "16_20_0" in item:
-            return "planner__q16_parallel"
-    if name == "pi":
-        if "_1_1_0" in item:
-            return "pi__serial_stable"
-        if "_1_0_0" in item:
-            return "pi__serial"
-        if "_0_0_0" in item:
-            return "pi__parallel"
     if name == "step_dir":
         if "False" in item:
             return "step_dir__pulse_default"
@@ -121,26 +105,43 @@ def run_suite(name: str, files: list[str]) -> bool:
         copied += 1
     if not copied:
         print("   warning: no FSTs found", flush=True)
-    return result.returncode == 0
+    return result.returncode == 0 and copied > 0
+
+
+def results_passed(path: Path) -> bool:
+    """Check cocotb's JUnit test cases, including missing or malformed results."""
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError) as exc:
+        print(f"   warning: cannot read {path}: {exc}", flush=True)
+        return False
+    cases = root.findall(".//testcase")
+    if not cases or any(case.find("failure") is not None or case.find("error") is not None
+                        for case in cases):
+        print(f"   warning: {path} has no test cases or contains failures", flush=True)
+        return False
+    return True
 
 
 def run_e2e() -> bool:
     print("\n== chip-level integration (make -C test -B)", flush=True)
     ok = True
+    results = ROOT / "test" / "results.xml"
+    tb_fst = ROOT / "test" / "tb.fst"
+    (OUT / "e2e__all_8_tests.fst").unlink(missing_ok=True)
+    results.unlink(missing_ok=True)
+    tb_fst.unlink(missing_ok=True)
     result = subprocess.run(["make", "-C", "test", "-B"], cwd=ROOT)
     ok &= result.returncode == 0
-    tb_fst = ROOT / "test" / "tb.fst"
     if tb_fst.exists():
-        dest = OUT / "e2e__all_8_tests.fst"
+        dest = OUT / "e2e__all_tests.fst"
         shutil.copy2(tb_fst, dest)
         print(f"   {dest.relative_to(ROOT)}  ({dest.stat().st_size:,} B)", flush=True)
     else:
         print("   warning: test/tb.fst was not produced", flush=True)
-
-    results = ROOT / "test" / "results.xml"
-    if results.exists() and 'failures="0"' not in results.read_text(errors="replace"):
-        print("   warning: test/results.xml contains failures", flush=True)
         ok = False
+
+    ok &= results_passed(results)
 
     # Short, directed chip-level traces.  The test filter selects a single
     # cocotb testcase, so the dump is not dominated by the full sweep.
@@ -148,8 +149,11 @@ def run_e2e() -> bool:
         print(f"\n== directed chip-level waveform ({name})", flush=True)
         env = os.environ.copy()
         env["COCOTB_TEST_FILTER"] = test_filter
+        results.unlink(missing_ok=True)
+        tb_fst.unlink(missing_ok=True)
         directed = subprocess.run(["make", "-C", "test", "-B"], cwd=ROOT, env=env)
         ok &= directed.returncode == 0
+        ok &= results_passed(results)
         if tb_fst.exists():
             dest = OUT / f"{name}.fst"
             shutil.copy2(tb_fst, dest)
