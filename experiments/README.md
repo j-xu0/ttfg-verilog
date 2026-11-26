@@ -16,7 +16,7 @@ workflow compiles this directory.
 * `bench/tb_engine_sweep.v` — Icarus bench that ticks `shared_motion_controller`
   `+goal=<steps> +code=<profile>` and prints position/speed/brake-sum per tick
   for diffing against the Python oracle (see
-  [`../docs/shared-controller.md`](../docs/shared-controller.md) for the schedule
+  [`docs/shared-controller.md`](docs/shared-controller.md) for the schedule
   and gotchas). It lives
   in a subdirectory so the `--source-dir experiments` glob above only sees the
   synthesizable prototypes.

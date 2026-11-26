@@ -24,15 +24,15 @@ status/interrupt change that followed missed that margin on its own — it added
 so it now also removes the 16-bit MISO shift register (a 4-bit snapshot is
 decoded by frame position) and sizes the accel operand to its table. That lands
 928.6 um² *below* the last routed branch and needs a fresh CI run; the numbers
-and the failure signature are in [the area budget](docs/area.md#the-status-port-cost).
+and the failure signature are in [the area budget](experiments/docs/area.md#the-status-port-cost).
 Post-layout timing signoff, gate-level harness X handling (`2fa46ad` stops the X
 at source in the planner bit index; the bench still needs a guard), and hardware
 tuning remain.
 
-- [Interface, pinout, and timing](docs/info.md)
-- [Implementation steps and unresolved proposal details](docs/implementation.md)
-- [The motion-control contract](docs/motion-planning.md)
-- [Area budget, measurement discipline, and rejected alternatives](docs/area.md)
+- [Interface, pinout, and timing](experiments/docs/info.md)
+- [Implementation steps and unresolved proposal details](experiments/docs/implementation.md)
+- [The motion-control contract](experiments/docs/motion-planning.md)
+- [Area budget, measurement discipline, and rejected alternatives](experiments/docs/area.md)
 - [Running the tests](test/README.md)
 - [Generating and viewing waveforms](test/README.md#waveforms)
 
@@ -44,7 +44,7 @@ repository's existing `ttgf26a` workflow. The system clock target is **10 MHz**;
 the P-only fixed-Kp restriction set: no velocity feedforward, fixed Kp (former
 code 1), and a fixed 8191 velocity ceiling. The earlier 58,175 um² design needed
 those cuts; the full ledger, measurement caveats and the list of approaches that
-were measured and rejected are in [the area budget](docs/area.md).
+were measured and rejected are in [the area budget](experiments/docs/area.md).
 
 The open PR stack is not merge-ready: #8 is a draft, the tip branch has no PR, and
 only the tip may claim 1x1 fit. Trim the area-history PR last.
