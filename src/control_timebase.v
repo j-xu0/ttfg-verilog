@@ -28,7 +28,8 @@ module control_timebase #(
 `endif
     localparam integer DIVISOR = CLOCK_HZ / CONTROL_HZ;
     localparam integer COUNT_WIDTH = (DIVISOR > 1) ? $clog2(DIVISOR) : 1;
-    localparam [COUNT_WIDTH-1:0] LAST_COUNT = DIVISOR - 1;
+    // Explicit width cast: DIVISOR-1 is a 32-bit integer expression.
+    localparam [COUNT_WIDTH-1:0] LAST_COUNT = COUNT_WIDTH'(DIVISOR - 1);
     reg [COUNT_WIDTH-1:0] count;
 
     always @(posedge clk or negedge rst_n) begin
