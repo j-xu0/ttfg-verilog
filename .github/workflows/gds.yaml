@@ -65,22 +65,28 @@ jobs:
         shell: bash
         run: pip install -r test/requirements.txt
 
+      - name: Install PDK via ciel (pinned to the gds flow version)
+        shell: bash
+        run: |
+          pip install ciel
+          ciel enable --pdk-family gf180mcu 54435919abffb937387ec956209f9cf5fd2dfbee
+          echo "PDK_ROOT=$HOME/.ciel/ciel/gf180mcu/versions/54435919abffb937387ec956209f9cf5fd2dfbee" >> "$GITHUB_ENV"
+
       - name: Stage netlist and SDF from GDS logs
         uses: actions/download-artifact@v4
         with:
           name: GDS_logs
           path: gds_logs
-          run-id: ${{ github.run_id }}
-          github-token: ${{ github.token }}
 
       - name: Run SDF sim
         shell: bash
         run: |
           SDF=$(ls gds_logs/runs/wokwi/55-openroad-stapostpnr/${{ matrix.corner }}/*.sdf | head -n 1)
           echo "Using SDF: $SDF"
+          echo "Using PDK_ROOT: $PDK_ROOT"
+          ls "$PDK_ROOT/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/verilog/" | head -n 5
           cp gds_logs/runs/wokwi/52-openroad-fillinsertion/*.nl.v test/gate_level_netlist.v
           cp "$SDF" test/gate_level.sdf
-          export PDK_ROOT=/home/runner/pdk
           make -C test GATES=yes SDF=yes
           ! grep failure test/results.xml
 
