@@ -741,3 +741,75 @@ async def zero_cancels_disabled_target(dut):
     await Timer(1, unit="us")
     assert int(dut.uo_out.value) == 0
     assert await spi_frame(dut, 0) == 0
+
+
+@cocotb.test()
+async def plan_profile_sweep(dut):
+    """All 8 PLAN accel codes e2e: accel-table and profile ALU paths.
+
+    Module tests sweep every profile isolated; e2e previously used only
+    codes 7 and 0, leaving the accel-table select and profile-dependent
+    serial-ALU corners unexercised at chip level.
+    """
+    await initialize(dut)
+    motor = MotorModel(dut)
+    cocotb.start_soon(motor.run())
+    set_input(dut, 5, 1)
+    base = 0
+    for code in range(8):
+        await spi_frame(dut, 0xC000 | code)
+        base += 16
+        await spi_frame(dut, 0x8000 | (base & 0x1FFF))
+        # Weakest accel codes ramp slowly: 16 steps needs ~256 ms at code 0.
+        await wait_settled(dut, timeout_us=600000)
+        assert motor.position == base, f"profile {code}: at {motor.position}"
+    assert await spi_frame(dut, 0) == STATUS_AT_TARGET
+
+
+@cocotb.test()
+async def far_targets_and_saturation(dut):
+    """Far +-1500-step moves with a shaft yank: sign/magnitude paths plus
+    P-stage saturation and recovery.
+
+    A 25-count backward yank mid-move forces position error past the +-32
+    clamp so total exceeds the 8191 limit (saturated=1); the loop must then
+    correct back to target. Structural zeros (shift/concat low bits,
+    unreachable increment top bits at default params) stay uncovered by
+    construction and are waived in scripts/coverage.py, not here.
+    """
+    await initialize(dut)
+    motor = MotorModel(dut)
+    cocotb.start_soon(motor.run())
+    await spi_frame(dut, 0xC03F)
+    await spi_frame(dut, 0x8000 | 1500)
+    set_input(dut, 5, 1)
+    await Timer(50, unit="ms")  # mid-ramp, reference running ahead
+    for _ in range(25):  # legal single-count steps, 1 us apart (>300 ns min)
+        motor.advance(-1)
+        await Timer(1, unit="us")
+    if os.environ.get("GATES") != "yes":
+        top = dut.user_project
+        for _ in range(10):  # next accepted ticks must clamp and saturate
+            for _ in range(10020):
+                await FallingEdge(dut.clk)
+                if int(top.control_ce.value):
+                    break
+            else:
+                raise AssertionError("control tick missing")
+            await RisingEdge(dut.clk)
+            await Timer(1, unit="ns")
+            for _ in range(2000):
+                if not int(top.pi_calculating.value):
+                    break
+                await RisingEdge(dut.clk)
+                await Timer(1, unit="ns")
+            if int(top.pi_saturated.value):
+                break
+        else:
+            raise AssertionError("yank never saturated the P stage")
+    await wait_settled(dut, timeout_us=1000000)
+    assert motor.position == 1500
+    await spi_frame(dut, 0x8000 | ((-1500) & 0x1FFF))
+    await wait_settled(dut, timeout_us=1000000)
+    assert motor.position == -1500
+    assert await spi_frame(dut, 0) == STATUS_AT_TARGET
