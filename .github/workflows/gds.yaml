@@ -37,6 +37,53 @@ jobs:
       - name: GL test
         uses: TinyTapeout/tt-gds-action/gl_test@ttgf26a
 
+  sdf_test:
+    # SDF-annotated gate sim (#15): same cocotb tests, real delays.
+    # Corners: max_ss_125C_3v00 (setup) and min_ff_n40C_3v60 (hold).
+    needs: gds
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        corner: [max_ss_125C_3v00, min_ff_n40C_3v60]
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install RTL tools
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python packages
+        shell: bash
+        run: pip install -r test/requirements.txt
+
+      - name: Stage netlist and SDF from GDS logs
+        uses: actions/download-artifact@v4
+        with:
+          name: GDS_logs
+          path: gds_logs
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Run SDF sim
+        shell: bash
+        run: |
+          SDF=$(ls gds_logs/runs/wokwi/55-openroad-stapostpnr/${{ matrix.corner }}/*.sdf | head -n 1)
+          echo "Using SDF: $SDF"
+          cp gds_logs/runs/wokwi/52-openroad-fillinsertion/*.nl.v test/gate_level_netlist.v
+          cp "$SDF" test/gate_level.sdf
+          export PDK_ROOT=/home/runner/pdk
+          make -C test GATES=yes SDF=yes
+          ! grep failure test/results.xml
+
   viewer:
     needs: gds
     runs-on: ubuntu-24.04
