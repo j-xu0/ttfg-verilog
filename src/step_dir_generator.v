@@ -139,9 +139,9 @@ module step_dir_generator #(
         // On a wrap, advanced_high equals HIGH_LIMIT. Only its set bits
         // need clearing; all other bits already have their required zero.
         for (bit_index=0; bit_index<HIGH_BITS; bit_index=bit_index+1) begin : high_reset
-            if ((HIGH_LIMIT >> bit_index) & 1) begin
+            if ((HIGH_LIMIT >> bit_index) & 1) begin : gen_clear
                 assign high_next[bit_index] = advanced_high[bit_index] && !phase_event;
-            end else begin
+            end else begin : gen_keep
                 assign high_next[bit_index] = advanced_high[bit_index];
             end
         end

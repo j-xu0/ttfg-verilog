@@ -19,12 +19,27 @@ VERILOG_SOURCES += $(addprefix $(SRC_DIR)/,$(PROJECT_SOURCES))
 else
 
 # Gate level simulation:
+ifeq ($(SDF),yes)
+# SDF-annotated gate sim (#15): real delays from the hardened netlist.
+# Stage test/gate_level_netlist.v and test/gate_level.sdf from the gds job
+# (GDS_logs/55-openroad-stapostpnr/<corner>/*.sdf, e.g. max_ss_125C_3v00 for
+# setup, min_ff_n40C_3v60 for hold) before running:
+#   make -C test GATES=yes SDF=yes
+# UNIT_DELAY must be off here: SDF already carries the delays.
+SIM_BUILD				= sim_build/sdf
+COMPILE_ARGS    += -DGL_TEST
+COMPILE_ARGS    += -DFUNCTIONAL
+COMPILE_ARGS    += -DUSE_POWER_PINS
+COMPILE_ARGS    += -DSIM
+COMPILE_ARGS    += -DSDF_ANNOTATE
+else
 SIM_BUILD				= sim_build/gl
 COMPILE_ARGS    += -DGL_TEST
 COMPILE_ARGS    += -DFUNCTIONAL
 COMPILE_ARGS    += -DUSE_POWER_PINS
 COMPILE_ARGS    += -DSIM
 COMPILE_ARGS    += -DUNIT_DELAY=\#1
+endif
 VERILOG_SOURCES += $(PDK_ROOT)/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/verilog/primitives.v
 VERILOG_SOURCES += $(PDK_ROOT)/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/verilog/gf180mcu_fd_sc_mcu7t5v0.v
 

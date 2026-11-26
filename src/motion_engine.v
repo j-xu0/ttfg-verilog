@@ -65,6 +65,7 @@ module motion_engine #(parameter integer STABLE_CONFIG=0) (
             // it (goal + 0) instead of being reconstructed from the residue.
             POSITION: begin operand_a=GOAL; operand=finishing ? ZERO : DISTANCE;
                               subtract=!negative && !finishing; end
+            default: begin end
         endcase
     end
     // EXPERIMENT: fixed maximum velocity, acceleration still plan-selected.

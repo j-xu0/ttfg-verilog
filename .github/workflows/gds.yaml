@@ -37,6 +37,59 @@ jobs:
       - name: GL test
         uses: TinyTapeout/tt-gds-action/gl_test@ttgf26a
 
+  sdf_test:
+    # SDF-annotated gate sim (#15): same cocotb tests, real delays.
+    # Corners: max_ss_125C_3v00 (setup) and min_ff_n40C_3v60 (hold).
+    needs: gds
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        corner: [max_ss_125C_3v00, min_ff_n40C_3v60]
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install RTL tools
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python packages
+        shell: bash
+        run: pip install -r test/requirements.txt
+
+      - name: Install PDK via ciel (pinned to the gds flow version)
+        shell: bash
+        run: |
+          pip install ciel
+          ciel enable --pdk-family gf180mcu 54435919abffb937387ec956209f9cf5fd2dfbee
+          echo "PDK_ROOT=$HOME/.ciel/ciel/gf180mcu/versions/54435919abffb937387ec956209f9cf5fd2dfbee" >> "$GITHUB_ENV"
+
+      - name: Stage netlist and SDF from GDS logs
+        uses: actions/download-artifact@v4
+        with:
+          name: GDS_logs
+          path: gds_logs
+
+      - name: Run SDF sim
+        shell: bash
+        run: |
+          SDF=$(ls gds_logs/runs/wokwi/55-openroad-stapostpnr/${{ matrix.corner }}/*.sdf | head -n 1)
+          echo "Using SDF: $SDF"
+          echo "Using PDK_ROOT: $PDK_ROOT"
+          ls "$PDK_ROOT/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/verilog/" | head -n 5
+          cp gds_logs/runs/wokwi/final/pnl/*.pnl.v test/gate_level_netlist.v
+          cp "$SDF" test/gate_level.sdf
+          make -C test GATES=yes SDF=yes
+          ! grep failure test/results.xml
+
   viewer:
     needs: gds
     runs-on: ubuntu-24.04

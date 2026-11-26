@@ -147,6 +147,18 @@ async def rtl_register_and_encoder_integration(dut):
     assert int(spi.plan.value) == 5
 
 
+def _safe_pins(value):
+    """int() of a cocotb handle, or None if it contains X/Z.
+
+    SDF-annotated gate sim (#15) legitimately shows X during reset/settle
+    and on sdf skew; MotorModel must skip those edges instead of throwing.
+    Everywhere else int() still throws so real X gets triaged, not hidden."""
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
 class MotorModel:
     """One legal x4 encoder count per STEP rising edge, with optional lost steps."""
     def __init__(self, dut):
@@ -158,7 +170,7 @@ class MotorModel:
         self.rises = []
         self.widths = []
         self.rise = None
-        self.previous = int(dut.uo_out.value)
+        self.previous = _safe_pins(dut.uo_out.value) or 0
 
     def advance(self, delta):
         self.position += delta
@@ -171,7 +183,9 @@ class MotorModel:
         while True:
             await Edge(self.dut.uo_out)
             await Timer(1, unit="ns")
-            pins = int(self.dut.uo_out.value)
+            pins = _safe_pins(self.dut.uo_out.value)
+            if pins is None:
+                continue  # X during SDF settle/skew: skip edge, keep previous
             now = get_sim_time(unit="step")  # Integer picoseconds (tb.v precision).
             if pins & 1 and not self.previous & 1:
                 assert pins & 4, "STEP without ENABLE"

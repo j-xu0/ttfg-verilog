@@ -27,6 +27,17 @@ module tb ();
   wire VGND = 1'b0;
 `endif
 
+`ifdef SDF_ANNOTATE
+  // SDF-annotated gate sim (#15): GDS job stages the chosen corner SDF
+  // at test/gate_level.sdf (sibling of gate_level_netlist.v). make is
+  // invoked with -C test so this relative path resolves in both
+  // sim_build/rtl and sim_build/sdf runs. Icarus applies real
+  // cell+wire delays instead of UNIT_DELAY.
+  initial begin
+    $sdf_annotate("gate_level.sdf", tb.user_project, "sdf.log", "TOOL_CONTROL");
+  end
+`endif
+
   tt_um_j_xu0_stepper user_project (
 
       // Include power ports for the Gate Level test:

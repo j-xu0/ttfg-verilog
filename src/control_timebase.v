@@ -28,7 +28,12 @@ module control_timebase #(
 `endif
     localparam integer DIVISOR = CLOCK_HZ / CONTROL_HZ;
     localparam integer COUNT_WIDTH = (DIVISOR > 1) ? $clog2(DIVISOR) : 1;
+    // DIVISOR-1 is a 32-bit integer expression truncated to COUNT_WIDTH;
+    // value is exact (DIVISOR <= 2^COUNT_WIDTH). Waiver, not a cast:
+    // CI yosys runs Verilog-2005, which rejects SystemVerilog casts.
+    // verilator lint_off WIDTHTRUNC
     localparam [COUNT_WIDTH-1:0] LAST_COUNT = DIVISOR - 1;
+    // verilator lint_on WIDTHTRUNC
     reg [COUNT_WIDTH-1:0] count;
 
     always @(posedge clk or negedge rst_n) begin
