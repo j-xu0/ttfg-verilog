@@ -1,47 +1,65 @@
-![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg) ![](../../workflows/fpga/badge.svg)
+![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg)
 
-# Tiny Tapeout 8-bit Programmable Counter
+# Tiny Tapeout GF180 Stepper Motor Controller
 
-- [Read the project documentation](docs/info.md)
+**Codename: TinyStep.** "TTS" was a placeholder; the chip's working name is now
+TinyStep. The module name and `info.yaml` title are unchanged for now, so the
+rename is a documentation-only change.
 
-An 8-bit binary up-counter with asynchronous active-low reset, synchronous
-parallel load, modulo-256 wraparound, and tri-state output control. The project
-targets the GF180MCU process through the Tiny Tapeout `ttgf26a` GitHub Actions
-flow.
+A staged implementation of the ECE298A stepper-driver proposal. The controller
+receives signed target positions over SPI, plans trapezoidal motion, and uses
+quadrature feedback and a fixed-gain proportional (P) controller to drive an
+external STEP/DIR motor driver.
 
-## What is Tiny Tapeout?
+**Closed-loop RTL is implemented:** SPI command registers, synchronized encoder
+feedback, a Q11 trapezoidal planner, a fixed-gain P stage, and timed
+STEP/DIR/ENABLE outputs. TARGET commands drive motion in simulation, correct
+missed steps and disturbances, and report busy/at-target/fault status over SPI,
+with one interrupt output for repolling.
 
-Tiny Tapeout is an educational project that aims to make it easier and cheaper than ever to get your digital and analog designs manufactured on a real chip.
+**The 1x1 tapeout build hardened and passed precheck** (CI run
+`44132561693`: 0 DRT violations, minimum feasible density 0.8300). The SPI
+status/interrupt change that followed missed that margin on its own — it added
+2 % of placed area and pushed TritonRoute past the density where it converges —
+so it now also removes the 16-bit MISO shift register (a 4-bit snapshot is
+decoded by frame position) and sizes the accel operand to its table. That lands
+928.6 um² *below* the last routed branch and needs a fresh CI run; the numbers
+and the failure signature are in [the area budget](docs/area.md#the-status-port-cost).
+Post-layout timing signoff, gate-level harness X handling (`2fa46ad` stops the X
+at source in the planner bit index; the bench still needs a guard), and hardware
+tuning remain.
 
-To learn more and get started, visit https://tinytapeout.com.
+- [Interface, pinout, and timing](docs/info.md)
+- [Implementation steps and unresolved proposal details](docs/implementation.md)
+- [The motion-control contract](docs/motion-planning.md)
+- [Area budget, measurement discipline, and rejected alternatives](docs/area.md)
+- [Running the tests](test/README.md)
+- [Generating and viewing waveforms](test/README.md#waveforms)
 
-## Set up your Verilog project
+The top module is `tt_um_j_xu0_stepper`. The GF180 build uses `gf180mcuD` and the
+repository's existing `ttgf26a` workflow. The system clock target is **10 MHz**;
+`info.yaml` and the 100 ns constraint in `src/config.json` agree.
 
-1. Add your Verilog files to the `src` folder.
-2. Edit the [info.yaml](info.yaml) and update information about your project, paying special attention to the `source_files` and `top_module` properties. If you are upgrading an existing Tiny Tapeout project, check out our [online info.yaml migration tool](https://tinytapeout.github.io/tt-yaml-upgrade-tool/).
-3. Edit [docs/info.md](docs/info.md) and add a description of your project.
-4. Adapt the testbench to your design. See [test/README.md](test/README.md) for more information.
+**The mandatory allocation is 1x1 and the current tip meets it.** The fit uses
+the P-only fixed-Kp restriction set: no velocity feedforward, fixed Kp (former
+code 1), and a fixed 8191 velocity ceiling. The earlier 58,175 um² design needed
+those cuts; the full ledger, measurement caveats and the list of approaches that
+were measured and rejected are in [the area budget](docs/area.md).
 
-The GitHub action will automatically build the ASIC files using [LibreLane](https://www.zerotoasiccourse.com/terminology/librelane/).
+The open PR stack is not merge-ready: #8 is a draft, the tip branch has no PR, and
+only the tip may claim 1x1 fit. Trim the area-history PR last.
 
-## Enable GitHub actions to build the results page
+With Python, Icarus Verilog, and make installed, run from the repository root:
 
-- [Enabling GitHub Pages](https://tinytapeout.com/faq/#my-github-action-is-failing-on-the-pages-part)
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r test/requirements.txt
+python -m pytest test/test_spi.py test/test_encoder.py test/test_timebase.py test/test_step_dir.py test/test_shared_controller.py -q
+make -C test -B
+```
 
-## Resources
-
-- [FAQ](https://tinytapeout.com/faq/)
-- [Digital design lessons](https://tinytapeout.com/digital_design/)
-- [Learn how semiconductors work](https://tinytapeout.com/siliwiz/)
-- [Join the community](https://tinytapeout.com/discord)
-- [Build your design locally](https://www.tinytapeout.com/guides/local-hardening/)
-
-## What next?
-
-- [Submit your design to the next shuttle](https://app.tinytapeout.com/).
-- Edit [this README](README.md) and explain your design, how it works, and how to test it.
-- Share your project on your social network of choice:
-  - LinkedIn [#tinytapeout](https://www.linkedin.com/search/results/content/?keywords=%23tinytapeout) [@TinyTapeout](https://www.linkedin.com/company/100708654/)
-  - Mastodon [#tinytapeout](https://chaos.social/tags/tinytapeout) [@matthewvenn](https://chaos.social/@matthewvenn)
-  - X (formerly Twitter) [#tinytapeout](https://twitter.com/hashtag/tinytapeout) [@tinytapeout](https://twitter.com/tinytapeout)
-  - Bluesky [@tinytapeout.com](https://bsky.app/profile/tinytapeout.com)
+The test workflow runs both unit and integration simulations. The separate GDS
+workflow performs GF180 hardening, precheck, and gate-level simulation when run
+on GitHub. Local RTL simulation does not establish post-layout timing or physical
+verification results.

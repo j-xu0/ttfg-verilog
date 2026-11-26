@@ -1,0 +1,41 @@
+name: hal
+
+on:
+  push:
+    paths:
+      - 'hal/**'
+      - '.github/workflows/hal.yml'
+  pull_request:
+    paths:
+      - 'hal/**'
+      - '.github/workflows/hal.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+        run: >
+          cmake -S hal -B hal/build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          -DCMAKE_C_FLAGS=-Werror
+
+      - name: Build
+        run: cmake --build hal/build --parallel
+
+      - name: Test
+        run: ctest --test-dir hal/build --output-on-failure
+
+      - name: Run the example
+        run: ./hal/build/bringup_example

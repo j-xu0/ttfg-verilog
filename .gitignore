@@ -11,3 +11,16 @@ test/sim_build
 test/__pycache__/
 test/results.xml
 test/gate_level_netlist.v
+
+.pytest_cache/
+.venv/
+test/build/
+
+abc.history
+scripts/__pycache__/
+
+test/waves/
+
+# Python bytecode in any test or tooling subdirectory
+__pycache__/
+*.py[cod]

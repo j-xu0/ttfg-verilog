@@ -1,0 +1,70 @@
+# Implementation steps
+
+The two checked-in proposals share the command/feedback architecture but differ
+on numerical details. Stage 1 implements their common foundation and records
+choices needed to make that foundation testable.
+
+| Step | Deliverable | Verification | Status |
+| --- | --- | --- | --- |
+| 1 | Mode-0 SPI and TARGET/PLAN register bank | Framing, atomic writes, masking, status, busy rejection, reset | Implemented |
+| 2 | Synchronized x4 quadrature decoder | Both directions, startup phases, illegal transitions, signed wrap, reset | Implemented |
+| 3 | GF180 top-level interface | 10 MHz/500 kHz integration, pin directions, fault/status/reset, motion pins | Implemented in RTL |
+| 4 | Timebase and trapezoidal planner | Reference model for acceleration/cruise/deceleration, reverse/short moves, range limits | Integrated shared planner/PI engine with profile LUT |
+| 5 | Fixed-point proportional feedback | Signed integer error, fixed Kp, command saturation | P-only fixed-gain in RTL (no feedforward, integrator or anti-windup) |
+| 6 | STEP/DIR/ENABLE generator | Pulse width/spacing, DIR setup/hold, disable and fault interlocks | Implemented in RTL |
+| 7 | Closed-loop integration | Motor/encoder model, forward/reverse targets, disturbances, settling | Implemented in RTL |
+| 8 | GF180 submission checks | Full-design synthesis, tile fit, STA, gate-level tests, precheck and physical verification | 1x1 GDS + precheck pass (run 44132561693); gate-level X tracked by `2fa46ad`, post-route STA pending |
+
+Steps 1 and 2 were built independently and cross-reviewed. Two bugs came out of
+that review and have regressions: a reset-with-CS-low SPI write (only a fresh
+post-reset transaction may write) and a new-TARGET race after a settled move
+(explicit commit priority).
+
+## Implemented integration choices
+
+The third implementation layer connects all functional blocks. The detailed
+proposal's 1 kHz loop and acceleration endpoints are used. Exact lookup tables,
+Q11 scaling, fixed-gain P ordering, STEP timing, and command/fault/settling semantics are
+specified in [`motion-planning.md`](motion-planning.md) and `info.md`.
+
+These are implementation choices where the proposals differ or omit details.
+Remaining hardware decisions are the actual driver IC/electrical timing,
+encoder-to-step conversion if not 1:1, homing, physical gain tuning, and whether
+idle holding torque is required. PWM is replaced by signed step-rate control
+for the detailed proposal's external STEP/DIR architecture. Status is not driven
+on dedicated pins: busy, at-target and the fault codes are returned by every SPI
+frame, and `uo_out[3]` is an interrupt that stays asserted until a read. Outputs
+4, 5 and 7 remain zero. Hardware homing is not implemented. Faults and the
+interrupt clear on a complete SPI read; see `fault-recovery.md`. A frame whose
+returned status word reports BUSY drops its write and must be retried by the
+host, which already has that bit; status readback is always available.
+
+Generic full-design synthesis passes with no structural check failures. The
+integrated serial planner uses bounded shift/add setup and stopping recurrences;
+no variable divider or variable-by-variable multiplier remains. GF180 tile fit,
+10 MHz timing, gate-level tests, and physical signoff remain to be established.
+
+The existing `ttgf26a` flow is retained for repository consistency. Its official
+[shuttle configuration](https://github.com/TinyTapeout/tinytapeout-gf-26a/blob/main/config.yaml)
+lists a June 22, 2026 end date; selecting an open shuttle
+and its matching template/flow is a separate requirement before submission.
+
+## Area-optimized layer
+
+The mandatory 1x1 constraint is restored. `shared_motion_controller.v` replaces
+the independent planner/PI engines with a generated 64-profile stopping LUT,
+reachable-range bounds, and bit-serial arithmetic and shared temporary storage. A
+dedicated single-cycle P stage publishes the clamped command; the integrator,
+anti-windup and velocity feedforward paths were removed, and Kp and `vmax` are
+fixed. Exact phase-factor cancellation and split-phase accumulation shrink STEP
+generation. Host-visible registers, Q11 position/velocity precision, selectable
+acceleration profiles, driver timings, faults and settling remain supported.
+
+The final P-only fixed-Kp tip **hardens on the 1x1 tile and passes precheck**
+(CI run `44132561693`: 0 DRT violations, minimum feasible density 0.8300, final
+placement area 42,913.48 um² against the 51,967 um² core). See
+[the area budget](area.md) for the restriction set, ledger and rejected
+alternatives. Do not enlarge the tile to bypass the check.
+
+The [shared-controller implementation](shared-controller.md) documents scheduling,
+register lifetimes, cancellation cleanup and verification.
