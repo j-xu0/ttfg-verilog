@@ -13,6 +13,15 @@ Usage:
 
 Output: text summary + JSON {totals, modules:{...}}. Exit 0 always
 (non-gating; for fuzz-corpus guidance, not a gate).
+
+Phantom signals (params, genvars, elab-time constants, by-design-unused)
+can never toggle, so they are excluded from the filtered metric by
+default (Covered/Verilator do the same). Raw counts are still reported
+for transparency.
+
+Usage:
+    python3 scripts/coverage.py test/tb.fst --out coverage.json
+    python3 scripts/coverage.py e2e.fst spi.fst encoder.fst --out merged.json
 """
 import argparse
 import json
@@ -33,6 +42,38 @@ MODULE_MAP = [
     (".pulses.", "step_dir_generator"),
     ("user_project", "project"),
 ]
+
+
+# Signals that can never toggle: elaboration-time constants Icarus dumps
+# into the FST. Covered/Verilator exclude these automatically.
+# - ALL_CAPS leaf: parameter/localparam (CLOCK_HZ, VMAX, IDLE, ...)
+# - bit_index: genvar loop indices (count_toggle[N].bit_index, ...)
+# - constant_gcd./trailing_zero_bits.: constant-function temporaries used
+#   to compute PHASE_GCD at elaboration (all 64-bit, never driven)
+# - uio_*/_unused: pins/wires unused by design (all uio are inputs, low)
+EXCLUDE_SUBSTRINGS = (
+    "constant_gcd.",
+    "trailing_zero_bits.",
+    "bit_index",
+)
+EXCLUDE_LEAVES = {
+    "uio_in", "uio_oe", "uio_out", "_unused",
+}
+# Single-driver constant wires: `assign vmax = VMAX` (13'd8191), bound=32,
+# limit={3'b0,vmax}. They can never toggle by construction; the real
+# saturation signal is `total` (kept). Covered marks these untestable too.
+TIED_CONSTANT_LEAVES = {
+    "vmax", "limit", "bound", "bound_ext",
+}
+
+
+def is_excluded(hier: str) -> bool:
+    leaf = hier.split(".")[-1].split("[")[0]
+    if leaf in EXCLUDE_LEAVES or leaf in TIED_CONSTANT_LEAVES:
+        return True
+    if leaf.isupper() and len(leaf) > 1:
+        return True
+    return any(s in hier for s in EXCLUDE_SUBSTRINGS)
 
 
 def module_of(hier: str) -> str:
@@ -135,35 +176,48 @@ def parse_vcd(vcd: Path):
     return ids
 
 
+def merge_into(agg, ids):
+    """Merge one parsed VCD (id-keyed) into hier-keyed aggregate (union)."""
+    for st in ids.values():
+        h, w = st["hier"], st["width"]
+        a = agg.setdefault(h, {"hier": h, "width": w, "risen": set(), "fallen": set()})
+        if a["width"] != w:
+            continue  # width mismatch across runs: keep first
+        a["risen"] |= st["risen"]
+        a["fallen"] |= st["fallen"]
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("fst", help="input .fst (or .vcd with --vcd)")
+    ap.add_argument("fst", nargs="+", help="input .fst files (merged by union; or .vcd with --vcd)")
     ap.add_argument("--out", default="coverage.json")
-    ap.add_argument("--vcd", action="store_true", help="input is already VCD")
+    ap.add_argument("--vcd", action="store_true", help="inputs are already VCD")
     ap.add_argument("--detail", default="", help="optional path for per-signal CSV")
+    ap.add_argument("--no-exclude", action="store_true", help="disable phantom-signal exclusion")
     args = ap.parse_args()
 
-    src = Path(args.fst)
-    if args.vcd:
-        vcd = src
-        tmp = None
-    else:
-        tmp = tempfile.NamedTemporaryFile(suffix=".vcd", delete=False)
-        tmp.close()
-        vcd = Path(tmp.name)
-        print(f"[coverage] fst2vcd {src} -> {vcd}", flush=True)
-        fst_to_vcd(src, vcd)
+    agg = {}
+    for src in args.fst:
+        src = Path(src)
+        if args.vcd:
+            vcd, tmp = src, None
+        else:
+            tmp = tempfile.NamedTemporaryFile(suffix=".vcd", delete=False)
+            tmp.close()
+            vcd = Path(tmp.name)
+            print(f"[coverage] fst2vcd {src} -> {vcd}", flush=True)
+            fst_to_vcd(src, vcd)
+        print("[coverage] parsing VCD...", flush=True)
+        merge_into(agg, parse_vcd(vcd))
+        if tmp is not None:
+            try:
+                vcd.unlink()
+            except OSError:
+                pass
 
-    print("[coverage] parsing VCD...", flush=True)
-    ids = parse_vcd(vcd)
-    if tmp is not None:
-        try:
-            vcd.unlink()
-        except OSError:
-            pass
-
-    mods = {}
-    for st in ids.values():
+    excl = (lambda h: False) if args.no_exclude else is_excluded
+    mods, fmods = {}, {}
+    for st in agg.values():
         mod = module_of(st["hier"])
         m = mods.setdefault(mod, {"signals": 0, "bits": 0, "rose": 0, "fell": 0, "both": 0})
         m["signals"] += 1
@@ -172,35 +226,48 @@ def main():
         m["rose"] += len(st["risen"])
         m["fell"] += len(st["fallen"])
         m["both"] += len(st["risen"] & st["fallen"])
+        if not excl(st["hier"]):
+            f = fmods.setdefault(mod, {"signals": 0, "bits": 0, "rose": 0, "fell": 0, "both": 0})
+            f["signals"] += 1
+            f["bits"] += w
+            f["rose"] += len(st["risen"])
+            f["fell"] += len(st["fallen"])
+            f["both"] += len(st["risen"] & st["fallen"])
+
+    def pct(a, b):
+        return 100 * a / max(b, 1)
 
     tot_bits = sum(m["bits"] for m in mods.values())
-    tot_rose = sum(m["rose"] for m in mods.values())
-    tot_fell = sum(m["fell"] for m in mods.values())
     tot_both = sum(m["both"] for m in mods.values())
+    ftot_bits = sum(m["bits"] for m in fmods.values())
+    ftot_both = sum(m["both"] for m in fmods.values())
+    srcs = ", ".join(args.fst)
 
-    print(f"\nToggle coverage from {src} ({len(ids)} signals, {tot_bits} bits)")
-    print(f"  bits with 0->1: {tot_rose}/{tot_bits} ({100*tot_rose/max(tot_bits,1):.1f}%)")
-    print(f"  bits with 1->0: {tot_fell}/{tot_bits} ({100*tot_fell/max(tot_bits,1):.1f}%)")
-    print(f"  bits both ways: {tot_both}/{tot_bits} ({100*tot_both/max(tot_bits,1):.1f}%)")
-    print(f"\n{'module':<24}{'signals':>9}{'bits':>8}{'rise%':>8}{'fall%':>8}{'both%':>8}")
+    print(f"\nToggle coverage from {srcs} ({len(agg)} signals, {tot_bits} bits)")
+    print(f"  raw bits both ways:      {tot_both}/{tot_bits} ({pct(tot_both, tot_bits):.1f}%)")
+    print(f"  filtered bits both ways: {ftot_both}/{ftot_bits} ({pct(ftot_both, ftot_bits):.1f}%)")
+    print(f"  excluded {tot_bits - ftot_bits} phantom bits "
+          f"(params/genvars/elab-consts/unused)")
+    print(f"\n{'module':<24}{'raw both%':>10}{'filt both%':>11}{'filt bits':>11}")
     for mod in sorted(mods, key=lambda k: -mods[k]["bits"]):
-        m = mods[mod]
-        print(f"{mod:<24}{m['signals']:>9}{m['bits']:>8}"
-              f"{100*m['rose']/max(m['bits'],1):>7.1f}%"
-              f"{100*m['fell']/max(m['bits'],1):>7.1f}%"
-              f"{100*m['both']/max(m['bits'],1):>7.1f}%")
+        m, f = mods[mod], fmods.get(mod, {"bits": 0, "both": 0})
+        print(f"{mod:<24}{pct(m['both'], m['bits']):>9.1f}%"
+              f"{pct(f['both'], f['bits']):>10.1f}%{f['bits']:>11}")
 
-    out = {"source": str(src), "signals": len(ids), "bits": tot_bits,
-           "rose": tot_rose, "fell": tot_fell, "both": tot_both, "modules": mods}
+    out = {"sources": args.fst, "signals": len(agg),
+           "bits": tot_bits, "both": tot_both,
+           "filtered_bits": ftot_bits, "filtered_both": ftot_both,
+           "modules": mods, "filtered_modules": fmods}
     Path(args.out).write_text(json.dumps(out, indent=1))
     print(f"\n[coverage] wrote {args.out}")
 
     if args.detail:
         with open(args.detail, "w") as f:
-            f.write("hier,width,rose,fell,both\n")
-            for st in sorted(ids.values(), key=lambda s: s["hier"]):
+            f.write("hier,width,rose,fell,both,excluded\n")
+            for st in sorted(agg.values(), key=lambda s: s["hier"]):
                 both = len(st["risen"] & st["fallen"])
-                f.write(f"{st['hier']},{st['width']},{len(st['risen'])},{len(st['fallen'])},{both}\n")
+                f.write(f"{st['hier']},{st['width']},{len(st['risen'])},"
+                        f"{len(st['fallen'])},{both},{int(excl(st['hier']))}\n")
         print(f"[coverage] wrote {args.detail}")
 
 
