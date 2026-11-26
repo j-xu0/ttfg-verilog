@@ -85,7 +85,7 @@ jobs:
           echo "Using SDF: $SDF"
           echo "Using PDK_ROOT: $PDK_ROOT"
           ls "$PDK_ROOT/gf180mcuD/libs.ref/gf180mcu_fd_sc_mcu7t5v0/verilog/" | head -n 5
-          cp gds_logs/runs/wokwi/52-openroad-fillinsertion/*.nl.v test/gate_level_netlist.v
+          cp gds_logs/runs/wokwi/final/pnl/*.pnl.v test/gate_level_netlist.v
           cp "$SDF" test/gate_level.sdf
           make -C test GATES=yes SDF=yes
           ! grep failure test/results.xml
