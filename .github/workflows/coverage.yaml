@@ -1,0 +1,47 @@
+name: coverage
+# Toggle-coverage spike (non-gating): Icarus FST -> VCD -> per-bit toggles.
+# Covered 0.7.10 can't parse this RTL and Verilator 4.038 rejects the
+# WIDTHTRUNC pragma, so this stdlib-only fallback (scripts/coverage.py +
+# fst2vcd) is the portable metric until CI moves to Verilator 5+.
+on: [push, workflow_dispatch]
+jobs:
+  toggle:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Install RTL tools
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y iverilog gtkwave
+
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python packages
+        shell: bash
+        run: pip install -r test/requirements.txt
+
+      - name: Run e2e sim for FST
+        run: |
+          cd test
+          make clean
+          make
+          ! grep failure results.xml
+          ls -lh tb.fst
+
+      - name: Toggle coverage (informational, never gates)
+        run: |
+          python3 scripts/coverage.py test/tb.fst --out coverage.json || true
+          cat coverage.json || true
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: toggle-coverage
+          path: |
+            coverage.json
+            test/tb.fst
