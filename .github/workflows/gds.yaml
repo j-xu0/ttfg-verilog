@@ -13,6 +13,11 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Stage Tiny Tapeout documentation
+        run: |
+          mkdir -p docs
+          cp experiments/docs/* docs/
+
       - name: Build GDS
         uses: TinyTapeout/tt-gds-action@ttgf26a
         with:
