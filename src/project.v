@@ -22,6 +22,9 @@ module tt_um_j_xu0_stepper (
   wire int_pending, frame_holds_motion, motion_event;
   (* async_reg = "true" *) reg enable_meta, enable_sync;
   (* async_reg = "true" *) reg pin_enable_meta, pin_enable_sync;
+  reg pin_enable_delay_one, pin_enable_delay_two;
+  wire pin_enable_voted = (pin_enable_sync && pin_enable_delay_one) ||
+      ((pin_enable_sync || pin_enable_delay_one) && pin_enable_delay_two);
   wire enable_reset_n = rst_n && ui_in[5];
   reg previous_sign, busy_last;
   reg range_fault;
@@ -65,15 +68,19 @@ module tt_um_j_xu0_stepper (
     end
   end
 
-  // ZERO_POSITION needs a synchronized sample of the host pin in both
+  // ZERO_POSITION uses a voted sample of the host pin in both
   // directions. The motion inhibit above also covers re-enable latency.
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       pin_enable_meta <= 1;
       pin_enable_sync <= 1;
+      pin_enable_delay_one <= 1;
+      pin_enable_delay_two <= 1;
     end else begin
       pin_enable_meta <= ui_in[5];
       pin_enable_sync <= pin_enable_meta;
+      pin_enable_delay_one <= pin_enable_sync;
+      pin_enable_delay_two <= pin_enable_delay_one;
     end
   end
 
@@ -146,7 +153,7 @@ module tt_um_j_xu0_stepper (
       .busy(busy), .at_target(at_target),
       .fault_code({range_fault, encoder_fault}),
       .fault_event(encoder_event || range_event),
-      .motion_event(motion_event), .motion_disabled(!pin_enable_sync),
+      .motion_event(motion_event), .motion_disabled(!pin_enable_voted),
       .fault_clear_pulse(fault_clear_pulse), .zero_position_pulse(zero_position_pulse),
       .miso(miso), .frame_holds_motion(frame_holds_motion),
       .int_pending(int_pending), .target(target), .plan(plan),

@@ -613,8 +613,8 @@ async def zero_position_requires_synchronized_disable(dut):
     await spi_begin(dut)
     assert await spi_bits(dut, 0xE000) == 0
     set_input(dut, 1, 1)
-    # CS commits on the third rising edge. Pull enable low after the
-    # second edge, too late for the disable to reach the SPI clock domain.
+    # CS commits on the fourth rising edge. Pull enable low after the
+    # second edge, too late for the disable vote to reach the SPI logic.
     await RisingEdge(dut.clk)
     await RisingEdge(dut.clk)
     await Timer(20, unit="ns")
@@ -644,7 +644,16 @@ async def zero_position_requires_synchronized_disable(dut):
     await spi_frame(dut, 0x8004)
     assert int(top.target.value) == 4
     assert int(top.command_pending.value)
-    await spi_frame(dut, 0xE000)
+
+    # One captured high on the enable readback is rejected by the vote.
+    await spi_begin(dut)
+    await spi_bits(dut, 0xE000, count=16)
+    await FallingEdge(dut.clk)
+    set_input(dut, 5, 1)
+    await FallingEdge(dut.clk)
+    set_input(dut, 5, 0)
+    await Timer(400, unit="ns")
+    await spi_end(dut)
     assert int(top.position.value) == 0
     assert int(top.target.value) == 0
     assert not int(top.command_pending.value)

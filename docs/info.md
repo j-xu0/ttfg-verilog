@@ -51,11 +51,11 @@ selected and `ena=1`.
 ### SPI registers
 
 SPI is CPOL=0, CPHA=0, MSB first, up to the proposal's 500 kHz target with a
-10 MHz system clock. Inputs pass through two-flop synchronizers and all logic
-runs from `clk`; SCLK is a sampled input, not a generated or secondary RTL clock.
+10 MHz system clock. SCLK, CS and MOSI are synchronized and majority-voted
+independently. All logic runs from `clk`; SCLK is a sampled input, not a generated or secondary RTL clock.
 
 A write is exactly 16 bits: `{1'b1, address[1:0], payload[12:0]}`. Registers update
-atomically after synchronized CS deassertion, never during a partial transfer.
+atomically after voted CS deassertion, never during a partial transfer.
 
 | Address | Name | Width | Reset | Interpretation |
 | --- | --- | --- | --- | --- |
@@ -74,7 +74,7 @@ empty selection is a no-op.
 
 ### Status and interrupt
 
-Every frame returns a 16-bit status snapshot captured at synchronized CS
+Every frame returns a 16-bit status snapshot captured at voted CS
 assertion:
 
 | Bits | Meaning |
@@ -111,18 +111,17 @@ number of coalesced completions is lost.
 Because motion is held while CS is low, do not park CS asserted between
 frames. Keep each SCLK half-period and the CS setup/hold/idle intervals at least four
 system clocks (400 ns at 10 MHz). Keep MOSI stable at least two clocks before
-rising SCLK and through falling SCLK. At 500 kHz, the SCLK half-period is 1 us.
-MISO is selected from the captured status by frame position, so a bit settles a
-couple of clocks after the rising edge that advances the frame; the four-clock
-half-period is what keeps it stable well before the host's next rising-edge
-sample. Do not shorten it.
+rising SCLK and through falling SCLK. At 500 kHz, the SCLK half-period is 1 µs. The four-clock minimum permits
+1.25 MHz at 50% duty cycle under the RTL timing model. The MISO bit index
+advances on the clock that consumes the voted SCLK rise, before the next
+host rising-edge sample.
 After reset, hold CS high for at least four clocks before selecting the slave.
 A frame held selected through reset is ignored until CS returns high and a new
 transaction begins. Hold SCLK low outside transactions.
 
 ### Encoder
 
-A and B pass through two-flop synchronizers. The sequence
+A and B are independently synchronized and majority-voted. The sequence
 `00 -> 01 -> 11 -> 10 -> 00` counts +4; the reverse sequence counts -4. Position
 is a signed 13-bit x4 count. The decoder itself wraps modulo 8192, but the
 top level latches a range fault on either signed wrap and aborts motion. The
@@ -130,11 +129,30 @@ controller requires one encoder count per motor step; other ratios require a
 scaling change. A simultaneous two-bit jump does not change position and latches fault until a complete explicit SPI read. The next valid edge can count
 again; the fault stays latched until acknowledged. See [fault recovery](fault-recovery.md) for codes, races, and the disabled-only `0xE000` position-zero command.
 
-Hold the encoder stationary through reset and at least four system-clock edges
+Hold the encoder stationary through reset and at least five system-clock edges
 after release so the initial phase can be established without a false count.
-During operation each AB phase must last at least four system-clock periods;
-short transitions can be missed. Reset zeroes the relative position; there is no
-absolute homing operation yet.
+During operation keep each AB phase stable for at least three system-clock
+periods (300 ns at 10 MHz). This is an RTL timing limit of roughly 3.33 million
+x4 counts/s, or 833 kHz per channel for equally spaced quadrature edges.
+Reset zeroes the relative position.
+
+### Input filtering and safety
+
+Each voted input uses the second stage of a two-flop synchronizer and its two
+successive one-clock delays. An isolated excursion captured once is rejected
+after a stable level. Repeated excursions can pass if two of any three
+samples agree, including two separated by a single sample. A clean stable
+transition changes the vote on the third system-clock edge counting the first
+capture. The SPI and encoder state machines consume the vote on the fourth
+edge, nominally 300–400 ns after the pin transition at 10 MHz. This adds one
+clock of latency over the two-flop-only path. These bounds assume captures
+outside the setup/hold aperture.
+
+The enable readback used for ZERO_POSITION is voted. Raw motion-enable low
+still asserts the asynchronous motor inhibit, even for a pulse between
+clock edges. Raw project deselection still gates the output pins and
+asynchronously invalidates SPI selection so a pending frame cannot commit.
+Reset assertion retains its asynchronous paths.
 
 ### GF180 build contract
 

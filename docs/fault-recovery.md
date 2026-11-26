@@ -28,9 +28,9 @@ not evidence that coordinates are correct. Further faults still stop motion.
 
 Write **0xE000** to establish position zero. Drive motion enable (`ui_in[5]`)
 low at least four system-clock periods (400 ns at 10 MHz) before asserting CS.
-Hold it low throughout the frame and for at least four system-clock periods
+Hold it low throughout the frame and for at least five system-clock periods
 after deasserting CS so the command can commit and the encoder can consume it.
-The SPI receiver requires synchronized disable from frame start through commit,
+The SPI receiver requires voted disable from frame start through commit,
 and a status word that does not report BUSY. Nonzero payloads are ignored.
 
 Keep the shaft stationary through this command. It zeros the encoder and TARGET,

@@ -104,6 +104,32 @@ async def quadrature_contract(dut):
     await reset(dut, 3)
 
 
+@cocotb.test()
+async def quadrature_input_voter(dut):
+    await reset(dut)
+    # Exercise both a false edge and a false diagonal across one capture.
+    for phase in (1, 3):
+        dut.a.value = phase >> 1
+        dut.b.value = phase & 1
+        await tick(dut)
+        dut.a.value = 0
+        dut.b.value = 0
+        for _ in range(6):
+            await tick(dut)
+            assert position(dut) == 0
+            assert int(dut.fault.value) == 0
+
+    # A valid sequence at the documented minimum phase duration retains
+    # order while new phases arrive before earlier ones have been counted.
+    for phase in (1, 3, 2, 0) * 3:
+        dut.a.value = phase >> 1
+        dut.b.value = phase & 1
+        await tick(dut, 3)
+    await tick(dut, 4)
+    assert position(dut) == 12
+    assert int(dut.fault.value) == 0
+
+
 def test_encoder(tmp_path):
     from cocotb_tools.runner import get_runner
 

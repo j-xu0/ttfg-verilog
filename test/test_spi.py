@@ -238,6 +238,62 @@ async def spi_contract(dut):
 
 
 @cocotb.test()
+async def spi_input_voter(dut):
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+    await reset(dut)
+
+    # Pulse CS across one capture while idle. It must not freeze motion.
+    dut.cs_n.value = 0
+    await cycles(dut)
+    dut.cs_n.value = 1
+    for _ in range(6):
+        await cycles(dut)
+        assert int(dut.frame_holds_motion.value) == 0
+
+    await begin(dut)
+    # One captured high on SCLK must not shift an extra bit.
+    dut.sclk.value = 1
+    await cycles(dut)
+    dut.sclk.value = 0
+    await cycles(dut, 6)
+    # An isolated CS high must not terminate the open frame.
+    dut.cs_n.value = 1
+    await cycles(dut)
+    dut.cs_n.value = 0
+    for _ in range(6):
+        await cycles(dut)
+        assert int(dut.frame_holds_motion.value) == 1
+
+    # A MOSI dip coincident with the first SCLK capture must not change
+    # the write flag. The remaining bits encode target 0x0123.
+    dut.mosi.value = 1
+    await cycles(dut, 4)
+    dut.sclk.value = 1
+    dut.mosi.value = 0
+    await cycles(dut)
+    dut.mosi.value = 1
+    await cycles(dut, 3)
+    dut.sclk.value = 0
+    await bits(dut, 0x0123, count=15)
+    await finish(dut, writes=1)
+    assert registers(dut) == (0x0123, 0)
+
+    dut.at_target.value = 1
+    await begin(dut)
+    await one_bit(dut, 0)
+    await one_bit(dut, 0)
+    assert int(dut.miso.value) == 1
+    await cycles(dut)
+    dut.selected.value = 0
+    await Timer(2, unit="ns")
+    assert int(dut.miso.value) == 0
+    dut.selected.value = 1
+    await Timer(2, unit="ns")
+    assert int(dut.miso.value) == 0
+    await finish(dut)
+
+
+@cocotb.test()
 async def recovery_commands(dut):
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     await reset(dut)
